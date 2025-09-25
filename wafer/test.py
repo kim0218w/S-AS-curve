@@ -194,24 +194,34 @@ if __name__ == "__main__":
                 print("Mode must be 'ol' or 'cl'")
                 continue
 
+            # 실행부는 그대로 (mode == "ol"/"cl" 분기 동일)
+
             print(f"[{target}] Done. Logged {len(logs['t'])} samples.")
 
-            # --- 그래프 그리기 ---
+            # --- 그래프 ---
             try:
-                plot_run_results(logs)   # 시간 vs 위치/속도 그래프
+                plot_run_results(logs)
             except Exception as e:
                 print("[WARN] 그래프 그리기 실패:", e)
 
-            # --- CSV로 로그 저장 ---
+            # --- CSV 저장 ---
             try:
                 df = pd.DataFrame(logs)
+                # 열이 존재하지 않아도 에러는 아님: 없는 열은 자동 생략됨
+                # 열 순서를 추천 스키마로 정리(있을 때만)
+                cols_order = [c for c in [
+                    "t",
+                    "com_pos_deg", "enc_pos_deg",
+                    "com_vel_dps", "enc_vel_dps",
+                    "cmd_rate"
+                ] if c in df.columns]
+
+                df = df[cols_order] if cols_order else df
                 log_filename = f"{target}_log.csv"
                 df.to_csv(log_filename, index=False)
                 print(f"[{target}] 로그 저장 완료 → {log_filename}")
             except Exception as e:
                 print("[WARN] 로그 저장 실패:", e)
-
-
             
     except KeyboardInterrupt:
         print("\n[Interrupted]")
