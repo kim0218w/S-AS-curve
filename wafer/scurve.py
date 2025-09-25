@@ -37,7 +37,7 @@ def calc_scurve_params(total_steps=None, v_max=None, total_time=None, show=True)
     return result
 
 
-# -------------------- S-Curve Profile --------------------
+# -------------------- Velocity Profiles --------------------
 def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
     """대칭 S-curve 속도"""
     if total_time <= 0:
@@ -45,9 +45,8 @@ def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
     return v_max * (np.sin(np.pi * t / total_time))**2
 
 
-# -------------------- AS-Curve Profile --------------------
 def as_curve_velocity(t: float, v_max: float, t_acc: float, t_dec: float, total_time: float) -> float:
-    """비대칭 S-curve 속도"""
+    """비대칭 AS-curve 속도"""
     t_const = total_time - t_acc - t_dec
     if t_const < 0:
         raise ValueError("가속+감속 시간이 전체 시간보다 짧아야 합니다.")
@@ -71,15 +70,12 @@ def as_curve_velocity(t: float, v_max: float, t_acc: float, t_dec: float, total_
 # -------------------- Run Motor with S-Curve --------------------
 def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
                      total_steps: int, v_max: float, total_time: float):
-    """
-    motor_id: 17 or 23
-    direction: 'f' or 'b'
-    """
     STEPS_PER_REV = 200
     MICROSTEP = 16
     PITCH_MM = 5.0
     ENC_CPR = 1000
 
+    # 모터 설정
     gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
 
@@ -123,14 +119,12 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
 def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
                       total_steps: int, v_max: float, total_time: float,
                       t_acc: float, t_dec: float):
-    """
-    Asymmetric S-curve 모터 실행
-    """
     STEPS_PER_REV = 200
     MICROSTEP = 16
     PITCH_MM = 5.0
     ENC_CPR = 1000
 
+    # 모터 설정
     gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
 
