@@ -195,6 +195,24 @@ if __name__ == "__main__":
                 continue
 
             print(f"[{target}] Done. Logged {len(logs['t'])} samples.")
+
+            # --- 그래프 그리기 ---
+            try:
+                plot_run_results(logs)   # 시간 vs 위치/속도 그래프
+            except Exception as e:
+                print("[WARN] 그래프 그리기 실패:", e)
+
+            # --- CSV로 로그 저장 ---
+            try:
+                df = pd.DataFrame(logs)
+                log_filename = f"{target}_log.csv"
+                df.to_csv(log_filename, index=False)
+                print(f"[{target}] 로그 저장 완료 → {log_filename}")
+            except Exception as e:
+                print("[WARN] 로그 저장 실패:", e)
+
+
+            
     except KeyboardInterrupt:
         print("\n[Interrupted]")
     finally:
