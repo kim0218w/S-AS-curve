@@ -45,6 +45,20 @@ def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
 
 
 # -------------------- Run Motor --------------------
+import time
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+# -------------------- Profile --------------------
+def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
+    if total_time <= 0:
+        return 0.0
+    return v_max * (np.sin(np.pi * t / total_time))**2
+
+
+# -------------------- Run Motor (Pulse Interval Based) --------------------
 def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
                      total_steps: int, v_max: float, total_time: float):
     """
@@ -60,40 +74,46 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
     gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
 
-    dt = 0.01
-    t = 0.0
     moved_steps = 0
-    step_accumulator = 0.0
     com_pos = 0.0
 
     prev_enc = encoder.read()
     enc_init = (prev_enc / ENC_CPR) * PITCH_MM
     data_log = []
 
-    sample_count = 0
+    start_time = time.time()
 
-    while t <= total_time and moved_steps < total_steps:
+    while moved_steps < total_steps:
+        t = time.time() - start_time
+        if t > total_time:
+            break
+
+        # 현재 목표 속도 [steps/s]
         com_vel_steps = s_curve_velocity(t, v_max, total_time)
-        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
-        com_pos += com_vel_mm * dt
+        if com_vel_steps < 1e-6:
+            time.sleep(0.001)
+            continue
 
-        step_accumulator += com_vel_steps * dt
-        while step_accumulator >= 1.0 and moved_steps < total_steps:
-            gpio.pulse_step(motor_id, 0.0005, 0.0005)
-            moved_steps += 1
-            step_accumulator -= 1.0
+        # 속도 → 펄스 간격
+        pulse_interval = 1.0 / com_vel_steps
 
+        # 모터에 펄스 출력
+        gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
+        moved_steps += 1
+
+        # 위치 계산 (mm)
+        com_pos = (moved_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
+
+        # 엔코더 읽기
         enc_now = encoder.read()
         delta = enc_now - prev_enc
         prev_enc = enc_now
         enc_pos_mm = (enc_now / ENC_CPR) * PITCH_MM - enc_init
-        enc_vel_mm = ((delta / dt) / ENC_CPR) * PITCH_MM if sample_count > 2 else 0.0
+        enc_vel_mm = ((delta / pulse_interval) / ENC_CPR) * PITCH_MM if delta != 0 else 0.0
 
+        # 로그 저장
         t_ms = int(round(t * 1000))
+        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
         data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
-
-        sample_count += 1
-        t += dt
-        time.sleep(dt)
 
     return data_log
