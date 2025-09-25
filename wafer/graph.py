@@ -2,7 +2,6 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from collections import deque
 
 
 # -------------------- CSV 저장 --------------------
@@ -31,7 +30,7 @@ def save_csv(df_or_list, filename="scurve_run.csv", **meta):
     preferred_cols = [
         "Time_ms", "Time_s",
         "com_Pos_mm", "enc_Pos_mm",
-        "com_RPM", "enc_RPM"
+        "com_RPS", "enc_RPS"
     ]
     cols = [c for c in preferred_cols if c in df.columns]
     other_cols = [c for c in df.columns if c not in cols]
@@ -46,47 +45,20 @@ def save_csv(df_or_list, filename="scurve_run.csv", **meta):
     return filepath
 
 
-# -------------------- run loop용 Encoder 속도 추정기 --------------------
-class EncoderVelEstimator:
-    def __init__(self, cpr, pitch_mm, win_size=10):
-        """
-        cpr: encoder counts per revolution
-        pitch_mm: 1회전당 이동(mm)
-        win_size: 속도 추정에 사용할 샘플 개수 (윈도우 크기)
-        """
-        self.cpr = cpr
-        self.pitch_mm = pitch_mm
-        self.win_size = win_size
-        self.buffer = deque(maxlen=win_size)
-
-    def update(self, delta, dt):
-        """
-        delta: 이번 샘플에서의 엔코더 카운트 차이
-        dt: 샘플링 시간(s)
-        """
-        self.buffer.append(delta)
-        if len(self.buffer) < 2:
-            return 0.0
-        # 윈도우 평균 기반 속도 추정 (mm/s)
-        delta_sum = sum(self.buffer)
-        vel_cps = delta_sum / (len(self.buffer) * dt)  # counts/sec
-        vel_mm_s = (vel_cps / self.cpr) * self.pitch_mm
-        return vel_mm_s
-
-
 # -------------------- 실제 데이터 기반 플롯 --------------------
 def plot_results(
     data_log,
-    title="S-Curve Motion",
+    title="S-Curve Motion (RPS)",
     filename="scurve_run.csv",
     pitch_mm=5.0,   # 1 rev 당 mm
     smooth_window=20,  # 이동 평균 창 크기 (샘플 개수 기준)
     **meta
 ):
     """
-    Commanded vs Encoder 속도를 절대값(RPM)으로 비교.
-    - enc_RPM은 run loop에서 기록한 enc_Vel_raw(mm/s)를 변환해서 사용
-    - 이동 평균 필터로 가독성 개선
+    Commanded vs Encoder 속도를 RPS (rev/s) 단위로 비교.
+    - com_RPS: com_Vel_mm_per_s → RPS 변환
+    - enc_RPS: enc_Vel_raw → RPS 변환
+    - 스무딩(이동 평균) 적용 가능
     """
     # --- DataFrame 준비 ---
     df = pd.DataFrame(data_log, columns=[
@@ -94,34 +66,34 @@ def plot_results(
     ])
     df["Time_s"] = df["Time_ms"] / 1000.0
 
-    # --- 명령 속도 -> RPM ---
+    # --- 명령 속도 -> RPS ---
     if pitch_mm:
-        df["com_RPM"] = (df["com_Vel_mm_per_s"] / pitch_mm) * 60.0
+        df["com_RPS"] = df["com_Vel_mm_per_s"] / pitch_mm
     else:
-        df["com_RPM"] = np.nan
+        df["com_RPS"] = np.nan
 
-    # --- run loop 속도(enc_Vel_raw) -> RPM ---
+    # --- run loop 속도(enc_Vel_raw) -> RPS ---
     if pitch_mm:
-        df["enc_RPM"] = (df["enc_Vel_raw"] / pitch_mm) * 60.0
+        df["enc_RPS"] = df["enc_Vel_raw"] / pitch_mm
     else:
-        df["enc_RPM"] = np.nan
+        df["enc_RPS"] = np.nan
 
     # --- 이동 평균 (스무딩) ---
     if smooth_window > 1:
-        df["enc_RPM"] = df["enc_RPM"].rolling(window=smooth_window, center=True).mean()
+        df["enc_RPS"] = df["enc_RPS"].rolling(window=smooth_window, center=True).mean()
 
     # --- Plot ---
     plt.figure(figsize=(8, 6))
 
-    # 속도 비교
+    # 속도 비교 (RPS)
     plt.subplot(2, 1, 1)
-    plt.plot(df["Time_ms"], df["com_RPM"], label="Commanded (RPM)", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_RPM"], label="Encoder (RPM, smoothed)", alpha=0.8)
-    plt.ylabel("Speed [RPM]")
+    plt.plot(df["Time_ms"], df["com_RPS"], label="Commanded (RPS)", linestyle="--")
+    plt.plot(df["Time_ms"], df["enc_RPS"], label="Encoder (RPS, smoothed)", alpha=0.8)
+    plt.ylabel("Speed [RPS]")
     plt.legend()
     plt.grid(True)
 
-    # 위치 비교
+    # 위치 비교 (mm)
     plt.subplot(2, 1, 2)
     plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position")
     plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position")
