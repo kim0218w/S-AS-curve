@@ -3,105 +3,70 @@ import threading
 from collections import deque
 
 try:
-    import lgpio
+    import smbus   # I2C 통신 라이브러리
 except ImportError:
-    lgpio = None
+    smbus = None
 
-# -------------------- Pin Assignments --------------------
-DIR_PIN = 20
-STEP_PIN = 21
-ENA_PIN = 16
-ENCODER_A_PIN = 3
-ENCODER_B_PIN = 2
-ENCODER_INVERT = True # 엔코더 방향 설정 (True: 역방향, False: 정방향)
+# -------------------- AS5600 I2C 설정 --------------------
+ENCODER_ADDR   = 0x36   # AS5600 기본 I2C 주소
+ENC_REG_ANGLE  = 0x0E   # 각도 레지스터 시작 주소
+ENCODER_INVERT = True   # True → 회전 방향 반전
 
-
-# -------------------- GPIO Helper --------------------
-class GPIOHelper:
-    def __init__(self):
-        self.sim = (lgpio is None)
-        self.h = None
-        if not self.sim:
-            try:
-                self.h = lgpio.gpiochip_open(0)
-                for pin in [DIR_PIN, STEP_PIN, ENA_PIN]:
-                    lgpio.gpio_claim_output(self.h, pin)
-                lgpio.gpio_write(self.h, ENA_PIN, 0)  # Enable = LOW
-            except Exception:
-                self.sim = True
-                self.h = None
-                print("[GPIO] GPIO 초기화 실패, 시뮬레이션 모드로 실행됩니다.")
-
-    def write(self, pin, val):
-        if not self.sim:
-            lgpio.gpio_write(self.h, pin, 1 if val else 0)
-
-    def pulse(self, pin, high_time_s, low_time_s):
-        if self.sim:
-            time.sleep(high_time_s + low_time_s)
-            return
-        lgpio.gpio_write(self.h, pin, 1)
-        time.sleep(high_time_s)
-        lgpio.gpio_write(self.h, pin, 0)
-        time.sleep(low_time_s)
-
-    def cleanup(self):
-        if not self.sim and self.h:
-            try:
-                lgpio.gpiochip_close(self.h)
-            except Exception:
-                pass
-
-
-# -------------------- Encoder --------------------
+# -------------------- Encoder (AS5600 I2C 전용) --------------------
 class Encoder:
-    def __init__(self):
-        self.gpio = GPIOHelper()
-        self.position = 0
-        self.sim = True
-        self._stop = False
-        self._thread = None        
-        try:
-            if lgpio is not None:
-                self.sim = False
-                self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-                self._thread.start()
-        except Exception:
-            self.sim = True
+    def __init__(self, bus_num=1):
+        if smbus is None:
+            raise RuntimeError("smbus 모듈이 필요합니다. (sudo apt install python3-smbus)")
 
-    def _read_ab(self):
-        if self.sim:
-            return 0, 0
-        a = lgpio.gpio_read(self.gpio.h, ENCODER_A_PIN)
-        b = lgpio.gpio_read(self.gpio.h, ENCODER_B_PIN)
-        return a, b
+        self.bus = smbus.SMBus(bus_num)
+        self.addr = ENCODER_ADDR
+        self.reg_angle = ENC_REG_ANGLE
+
+        self.position = 0   # 누적 카운트 (스텝 기반)
+        self._stop = False
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._thread.start()
+
+    def _read_angle_raw(self):
+        """ I2C에서 12비트 원시 각도값 읽기 (0~4095) """
+        try:
+            data = self.bus.read_i2c_block_data(self.addr, self.reg_angle, 2)
+            raw = (data[0] << 8) | data[1]
+            raw &= 0x0FFF  # 12bit 마스크
+            return raw
+        except Exception as e:
+            print(f"[Encoder] I2C read error: {e}")
+            return 0
 
     def _poll_loop(self):
-        prev_a, prev_b = self._read_ab()
-        prev = (prev_a << 1) | prev_b
-        transition_to_delta = {
-            0b0001: +1, 0b0011: +1, 0b0110: +1, 0b0100: +1,
-            0b0010: -1, 0b0111: -1, 0b1111: -1, 0b1100: -1,
-        }
+        prev_raw = self._read_angle_raw()
         while not self._stop:
-            a, b = self._read_ab()
-            curr = (a << 1) | b
-            key = ((prev << 2) | curr) & 0b1111
-            delta = transition_to_delta.get(key, 0)
+            raw = self._read_angle_raw()
+            delta = raw - prev_raw
+
+            # wrap-around 보정 (4096 카운트 = 360도)
+            if delta > 2048:
+                delta -= 4096
+            elif delta < -2048:
+                delta += 4096
+
             if ENCODER_INVERT:
                 delta = -delta
-            if delta != 0:
-                self.position += delta
-                prev = curr
-            time.sleep(0.001)
+
+            self.position += delta
+            prev_raw = raw
+            time.sleep(0.001)  # 1 kHz polling
 
     def reset(self):
+        """엔코더 누적값 초기화"""
         self.position = 0
 
     def read(self):
+        """누적된 엔코더 카운트 반환"""
         return int(self.position)
 
     def stop(self):
+        """스레드 안전 종료"""
         self._stop = True
         if self._thread:
             try:
@@ -110,9 +75,15 @@ class Encoder:
                 pass
 
 
-# -------------------- Velocity Estimator --------------------
+# -------------------- 속도 추정기 --------------------
 class EncoderVelEstimator:
-    def __init__(self, cpr, pitch_mm, win_size=10, lpf_alpha=0.2):
+    def __init__(self, cpr=4096, pitch_mm=1.0, win_size=10, lpf_alpha=0.2):
+        """
+        cpr: 엔코더 카운트/회전 (AS5600은 4096)
+        pitch_mm: 리드(mm) (볼스크류 사용 시)
+        win_size: 이동 평균 윈도우
+        lpf_alpha: 저역통과 필터 계수
+        """
         self.cpr = cpr
         self.pitch_mm = pitch_mm
         self.win_size = win_size
