@@ -64,11 +64,10 @@ def plot_results(
         raise ValueError("시간 축이 올바르지 않습니다.")
     fs = 1.0 / dt  # Hz
 
-    # 명령 속도(mm/s) -> RPS
-    if pitch_mm and pitch_mm != 0:
-        df["com_RPS"] = df["com_Vel_mm_per_s"] / pitch_mm
-    else:
-        df["com_RPS"] = np.nan
+     # mm/s -> RPS
+    df["enc_RPS"] = (vel_mm_s / pitch_mm) if (pitch_mm and pitch_mm != 0) else np.nan
+    df["enc_RPS"] = np.abs(df["enc_RPS"])   #  음수 제거
+    df["com_RPS"] = np.abs(df["com_Vel_mm_per_s"] / pitch_mm)
 
     # ----- 엔코더 위치 기반 속도(RPS) 추정 -----
     pos = df["enc_Pos_mm"].to_numpy()
@@ -121,14 +120,27 @@ def plot_results(
     show_every = max(1, int(fs * 0.01))  # ~10ms당 1점 표시
     idx = np.arange(0, len(df), show_every)
 
-    # 그래프 (RPS 기준)
-    plt.figure(figsize=(8, 5))
-    plt.plot(df["Time_ms"].iloc[idx], df["com_RPS"].iloc[idx], label="Commanded (RPS)", linestyle="--")
-    plt.plot(df["Time_ms"].iloc[idx], df["enc_RPS"].iloc[idx], label=f"Encoder (RPS) [{smooth_method}, ~{smooth_ms}ms]")
-    plt.xlabel("Time [ms]")
+     # ----- Plot -----
+    plt.figure(figsize=(8, 6))
+
+    # (1) 속도 그래프 (RPS)
+    plt.subplot(2, 1, 1)
+    plt.plot(df["Time_ms"], df["com_RPS"], label="Commanded (RPS)", linestyle="--")
+    plt.plot(df["Time_ms"], df["enc_RPS"], label=f"Encoder (RPS) [{smooth_method}]")
     plt.ylabel("Speed [RPS]")
     plt.legend()
     plt.grid(True)
+
+    # (2) 위치 그래프
+    plt.subplot(2, 1, 2)
+    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position")
+    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position")
+    plt.xlabel("Time [ms]")
+    plt.ylabel("Position [mm]")
+    plt.legend()
+    plt.grid(True)
+
+    plt.suptitle(title)
     plt.tight_layout()
     plt.show()
 
