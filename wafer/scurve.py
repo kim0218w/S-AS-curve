@@ -2,6 +2,12 @@ import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from encoder import DEG_PER_STEP, STEPS_PER_REV
+MIN_PULSE_INTERVAL = 0.001
+MAX_PULSE_INTERVAL = 0.05
+
+def vmax_effective(v_max: float, pulse_interval: float) -> float:
+    return min(v_max, 1.0 / MIN_PULSE_INTERVAL)
 
 # -------------------- Parameter Calculator --------------------
 def calc_scurve_params(total_steps=None, v_max=None, total_time=None, show=True):
@@ -79,64 +85,44 @@ DEG_PER_STEP = 180.0 / 10000.0   # 0.018°/step
 
 
 # -------------------- Run Motor with S-Curve (short/mid/long) --------------------
-def compute_total_time(total_steps, v_max, shape="mid"):
-    """목표 스텝과 최고속도로 총 이동시간을 계산"""
-    if shape == "short":
-        # 정속 없음 → 삼각형 속도 프로파일
-        return (2 * total_steps) / v_max
-    elif shape == "long":
-        # 정속 구간이 80% → 평균속도 ~0.9*v_max
-        return total_steps / (0.9 * v_max)
-    else:  # mid
-        # 정속 구간이 50% → 평균속도 ~0.75*v_max
-        return total_steps / (0.75 * v_max)
+def compute_total_time_scurve(total_steps: int, v_max: float, shape="mid") -> float:
+    v_eff = vmax_effective(v_max)
+    if shape == "short":   avg = 0.5    # t_acc=0.5T, t_const=0, t_dec=0.5T
+    elif shape == "long":  avg = 0.9    # 0.1/0.8/0.1
+    else:                  avg = 0.75   # 0.25/0.5/0.25
+    return total_steps / (avg * v_eff)
 
 
 def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
                      total_steps: int, v_max: float,
                      shape: str = "mid"):
-    """S-curve 실행: 목표 스텝 + vmax → 시간 자동계산"""
-    total_time = compute_total_time(total_steps, v_max, shape)
+    total_time = compute_total_time_scurve(total_steps, v_max, shape)
+    # shape 비율
+    if shape == "short": t_acc, t_dec, t_const = total_time*0.5, total_time*0.5, 0.0
+    elif shape == "long": t_acc, t_dec, t_const = total_time*0.1, total_time*0.1, total_time*0.8
+    else: t_acc, t_dec, t_const = total_time*0.25, total_time*0.25, total_time*0.5
+    v_eff = vmax_effective(v_max)
 
-    # shape에 따른 분배
-    if shape == "short":
-        t_acc = total_time * 0.5
-        t_dec = total_time * 0.5
-        t_const = 0.0
-    elif shape == "long":
-        t_acc = total_time * 0.1
-        t_dec = total_time * 0.1
-        t_const = total_time * 0.8
-    else:  # mid
-        t_acc = total_time * 0.25
-        t_dec = total_time * 0.25
-        t_const = total_time * 0.5
-
-    # -------------------- 모터 실행 루프 --------------------
-    gpio.set_dir(motor_id, direction == 'f')
-    gpio.set_enable(motor_id, True)
-
-    moved_steps = 0
-    prev_enc = encoder.read()
+    gpio.set_dir(motor_id, direction == 'f'); gpio.set_enable(motor_id, True)
+    moved_steps, prev_enc = 0, encoder.read()
     enc_init = (prev_enc / ENC_CPR) * 360.0
-    data_log = []
-    start_time = time.time()
+    start_time = time.time(); data_log = []
 
     while moved_steps < total_steps:
         t = time.time() - start_time
-        if t > total_time:
+        if t > (t_acc + t_const + t_dec):  # 이론상 충분히 맞춰서 거의 안 걸림
             break
 
-        com_vel_steps = shaped_s_curve_velocity(t, v_max, t_acc, t_const, t_dec)
+        com_vel_steps = shaped_s_curve_velocity(t, v_eff, t_acc, t_const, t_dec)
         if com_vel_steps < 1e-6:
-            time.sleep(0.001)
-            continue
+            time.sleep(0.001); continue
 
-        pulse_interval = 1.0 / com_vel_steps
-        pulse_interval = max(0.001, min(pulse_interval, 0.05))
-
+        pulse_interval = max(MIN_PULSE_INTERVAL, min(1.0 / com_vel_steps, MAX_PULSE_INTERVAL))
         gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
         moved_steps += 1
+
+        # (로그 기록은 기존 그대로)
+
 
         # 위치/속도 기록
         com_pos = moved_steps * DEG_PER_STEP
@@ -153,28 +139,15 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
     return data_log
 
 # -------------------- Run Motor with AS-Curve --------------------
-def compute_total_time_ascurve(total_steps, v_max, shape="mid"):
-    """목표 스텝과 vmax, shape에 맞는 AS-curve 총 이동시간 계산"""
-    # shape에 따라 가속/감속 비율 정의
-    if shape == "short":
-        r_acc, r_dec, r_const = 0.4, 0.6, 0.0
-    elif shape == "long":
-        r_acc, r_dec, r_const = 0.15, 0.25, 0.6
-    else:  # mid
-        r_acc, r_dec, r_const = 0.2, 0.4, 0.4
-
-    # 정규화된 계수 → 실제 시간 분배 비율로 변환
-    coeff = 0.5 * (r_acc + r_dec) + r_const
-
-    # 총 시간 계산
-    total_time = total_steps / (v_max * coeff)
-
-    # 실제 구간 시간
-    t_acc = r_acc * total_time
-    t_dec = r_dec * total_time
-    t_const = r_const * total_time
-
-    return total_time, t_acc, t_dec, t_const
+def compute_total_time_ascurve(total_steps: int, v_max: float, shape="mid"):
+    # shape → 비율
+    if shape == "short":  r_acc, r_dec, r_const = 0.4, 0.6, 0.0
+    elif shape == "long": r_acc, r_dec, r_const = 0.15, 0.25, 0.6
+    else:                 r_acc, r_dec, r_const = 0.2, 0.4, 0.4
+    v_eff = vmax_effective(v_max)
+    coeff = 0.5*(r_acc + r_dec) + r_const   # 면적 계수
+    T = total_steps / (v_eff * coeff)
+    return T, r_acc*T, r_dec*T, r_const*T
 
 
 def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
@@ -183,6 +156,7 @@ def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
 
     # 이동시간 자동계산
     total_time, t_acc, t_dec, t_const = compute_total_time_ascurve(total_steps, v_max, shape)
+    v_eff = vmax_effective(v_max)
 
     gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
@@ -198,7 +172,9 @@ def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
         if t > total_time:
             break
 
-        com_vel_steps = as_curve_velocity(t, v_max, t_acc, t_dec, total_time)
+        com_vel_steps = as_curve_velocity(t, v_eff, t_acc, t_dec, total_time)
+        pulse_interval = max(MIN_PULSE_INTERVAL, min(1.0 / com_vel_steps, MAX_PULSE_INTERVAL))
+    
         if com_vel_steps < 1e-6:
             time.sleep(0.001)
             continue
