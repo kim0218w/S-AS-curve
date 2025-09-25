@@ -1,11 +1,6 @@
 import time
 import threading
-
-try:
-    import lgpio
-except ImportError:
-    lgpio = None
-
+import lgpio
 
 # -------------------- Pin Assignments --------------------
 
@@ -29,77 +24,44 @@ PWM_PIN = 13
 # -------------------- GPIO Helper --------------------
 class GPIOHelper:
     def __init__(self):
-        self.sim = (lgpio is None)
-        self.h = None
-        if not self.sim:
-            try:
-                self.h = lgpio.gpiochip_open(0)
-                # 두 모터 핀 전부 출력으로 등록
-                for pin in [DIR_PIN_17, STEP_PIN_17, ENA_PIN_17,
-                            DIR_PIN_23, STEP_PIN_23, ENA_PIN_23]:
-                    lgpio.gpio_claim_output(self.h, pin)
-                # 초기값 (모터 Disable 상태)
-                for pin in [ENA_PIN_17, ENA_PIN_23]:
-                    lgpio.gpio_write(self.h, pin, 1)
-                for pin in [DIR_PIN_17, DIR_PIN_23, STEP_PIN_17, STEP_PIN_23]:
-                    lgpio.gpio_write(self.h, pin, 0)
-            except Exception:
-                self.sim = True
-                self.h = None
-                print("[GPIO] 초기화 실패 → 시뮬레이션 모드")
+        # GPIO 칩 열기
+        self.h = lgpio.gpiochip_open(0)
+
+        # 두 모터 핀 전부 출력으로 등록
+        for pin in [DIR_PIN_17, STEP_PIN_17, ENA_PIN_17,
+                    DIR_PIN_23, STEP_PIN_23, ENA_PIN_23]:
+            lgpio.gpio_claim_output(self.h, pin)
+
+        # 초기값 (모터 Disable 상태)
+        for pin in [ENA_PIN_17, ENA_PIN_23]:
+            lgpio.gpio_write(self.h, pin, 1)
+        for pin in [DIR_PIN_17, DIR_PIN_23, STEP_PIN_17, STEP_PIN_23]:
+            lgpio.gpio_write(self.h, pin, 0)
 
     def set_enable(self, motor: int, enable: bool):
         """모터 선택 (17/23), enable True=활성"""
         pin = ENA_PIN_17 if motor == 17 else ENA_PIN_23
         val = 0 if enable else 1
-        if not self.sim:
-            lgpio.gpio_write(self.h, pin, val)
+        lgpio.gpio_write(self.h, pin, val)
 
     def set_dir(self, motor: int, forward: bool):
         """모터 방향"""
         pin = DIR_PIN_17 if motor == 17 else DIR_PIN_23
-        if not self.sim:
-            lgpio.gpio_write(self.h, pin, 1 if forward else 0)
+        lgpio.gpio_write(self.h, pin, 1 if forward else 0)
 
-    def write(self, pin, val):
-        if not self.sim:
-            lgpio.gpio_write(self.h, pin, 1 if val else 0)
-
-    def pulse(self, pin, high_time_s, low_time_s):
-        if self.sim or self.h is None:
-            time.sleep(high_time_s + low_time_s)
-            return
-        lgpio.gpio_write(self.h, pin, 1)
-        time.sleep(high_time_s)
-
-    def pulse(self, pin, high_time_s, low_time_s):
-        if self.sim:
-            time.sleep(high_time_s + low_time_s)
-            return
-        lgpio.gpio_write(self.h, pin, 1)
-        time.sleep(high_time_s)
-        lgpio.gpio_write(self.h, pin, 0)
-        time.sleep(low_time_s)   
-    
     def pulse_step(self, motor: int, high_time=0.00002, low_time=0.00002):
         """STEP 펄스 발생"""
         pin = STEP_PIN_17 if motor == 17 else STEP_PIN_23
-        if self.sim:
-            time.sleep(high_time + low_time)
-            return
         lgpio.gpio_write(self.h, pin, 1)
         time.sleep(high_time)
         lgpio.gpio_write(self.h, pin, 0)
         time.sleep(low_time)
 
     def cleanup(self):
-        if not self.sim and self.h:
-            try:
-                for motor in [17, 23]:
-                    self.set_enable(motor, False)  # 종료 시 disable
-                lgpio.gpiochip_close(self.h)
-            except Exception:
-                pass
+        if self.h:
+            for motor in [17, 23]:
+                self.set_enable(motor, False)  # 종료 시 disable
+            lgpio.gpiochip_close(self.h)
 
 
 # -------------------- Encoder --------------------
@@ -107,22 +69,18 @@ class Encoder:
     def __init__(self, gpio: GPIOHelper):
         self.gpio = gpio
         self.position = 0
-        self.sim = True
         self._stop = False
         self._thread = None
-        try:
-            if lgpio is not None and gpio.h is not None:
-                lgpio.gpio_claim_input(gpio.h, ENCODER_A_PIN)
-                lgpio.gpio_claim_input(gpio.h, ENCODER_B_PIN)
-                self.sim = False
-                self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-                self._thread.start()
-        except Exception:
-            self.sim = True
+
+        # 엔코더 입력 핀 등록
+        lgpio.gpio_claim_input(gpio.h, ENCODER_A_PIN)
+        lgpio.gpio_claim_input(gpio.h, ENCODER_B_PIN)
+
+        # 폴링 쓰레드 시작
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._thread.start()
 
     def _read_ab(self):
-        if self.sim:
-            return 0, 0
         a = lgpio.gpio_read(self.gpio.h, ENCODER_A_PIN)
         b = lgpio.gpio_read(self.gpio.h, ENCODER_B_PIN)
         return a, b
@@ -155,10 +113,7 @@ class Encoder:
     def stop(self):
         self._stop = True
         if self._thread:
-            try:
-                self._thread.join(timeout=0.5)
-            except Exception:
-                pass
+            self._thread.join(timeout=0.5)
 
 
 # -------------------- Velocity Estimator --------------------
