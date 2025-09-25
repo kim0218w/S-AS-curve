@@ -71,6 +71,16 @@ class GPIOHelper:
             return
         lgpio.gpio_write(self.h, pin, 1)
         time.sleep(high_time_s)
+
+    def pulse(self, pin, high_time_s, low_time_s):
+        if self.sim:
+            time.sleep(high_time_s + low_time_s)
+            return
+        lgpio.gpio_write(self.h, pin, 1)
+        time.sleep(high_time_s)
+        lgpio.gpio_write(self.h, pin, 0)
+        time.sleep(low_time_s)   
+    
     def pulse_step(self, motor: int, high_time=0.00002, low_time=0.00002):
         """STEP 펄스 발생"""
         pin = STEP_PIN_17 if motor == 17 else STEP_PIN_23
