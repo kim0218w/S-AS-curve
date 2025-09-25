@@ -44,10 +44,7 @@ def save_csv(data_log, filename_base="scurve_run",
 
 
 def plot_results(data_log, save_png=True, title="Stepper Motor Motion",
-                 motor_id=None, steps=None, shape=None, smooth_alpha=0.2):
-    """
-    smooth_alpha: EMA 필터 계수 (0~1), 작을수록 더 부드럽게, 기본=0.2
-    """
+                 motor_id=None, steps=None, shape=None, smooth_alpha=0.1):
     if not data_log:
         print("[WARN] 데이터가 비어 있어서 그래프를 그릴 수 없습니다.")
         return
@@ -58,11 +55,14 @@ def plot_results(data_log, save_png=True, title="Stepper Motor Motion",
     ])
     df["Time_s"] = df["Time_ms"] / 1000.0
 
-    # -------------------- 속도 smoothing (EMA) --------------------
+    # -------------------- 위치 기반 속도 재계산 --------------------
+    df["enc_Vel_from_pos"] = df["enc_Angle_deg"].diff() / df["Time_s"].diff()
+
+    # EMA smoothing 적용
     if smooth_alpha and 0 < smooth_alpha < 1:
-        df["enc_Vel_deg_per_s_smooth"] = df["enc_Vel_deg_per_s"].ewm(alpha=smooth_alpha).mean()
+        df["enc_Vel_from_pos_smooth"] = df["enc_Vel_from_pos"].ewm(alpha=smooth_alpha).mean()
     else:
-        df["enc_Vel_deg_per_s_smooth"] = df["enc_Vel_deg_per_s"]
+        df["enc_Vel_from_pos_smooth"] = df["enc_Vel_from_pos"]
 
     plt.figure(figsize=(12, 6))
     plt.suptitle(title, fontsize=14, fontweight="bold")
@@ -71,8 +71,8 @@ def plot_results(data_log, save_png=True, title="Stepper Motor Motion",
     plt.subplot(2, 1, 1)
     plt.plot(df["Time_s"], df["com_Vel_deg_per_s"],
              label="Commanded Angular Velocity", linestyle="--", linewidth=2)
-    plt.plot(df["Time_s"], df["enc_Vel_deg_per_s_smooth"],
-             label=f"Encoder Angular Velocity (EMA α={smooth_alpha})",
+    plt.plot(df["Time_s"], df["enc_Vel_from_pos_smooth"],
+             label=f"Encoder Angular Velocity (from position, EMA α={smooth_alpha})",
              alpha=0.9, linewidth=1.5)
     plt.ylabel("Angular Velocity [deg/s]")
     plt.legend(loc="best")
