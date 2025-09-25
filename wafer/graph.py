@@ -11,8 +11,8 @@ def save_csv(data_log, filename="scurve_run.csv", **meta):
         writer = csv.writer(f)
         # 헤더
         writer.writerow([
-            "Time_ms", "com_Pos_deg", "enc_Pos_deg",
-            "com_Vel_deg_per_s", "enc_Vel_deg_per_s"
+            "Time_ms", "com_Pos_mm", "enc_Pos_mm",
+            "com_Vel_mm_per_s", "enc_Vel_raw"
         ])
         writer.writerows(data_log)
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
@@ -27,44 +27,43 @@ def plot_results(data_log, title="S-Curve Motion", motor_id=None, steps=None, sh
                  예: 20 → 약 20ms~50ms smoothing 효과
     """
 
+    # DataFrame 변환
     df = pd.DataFrame(data_log, columns=[
-        "Time_ms", "com_Pos_deg", "enc_Pos_deg",
-        "com_Vel_deg_per_s", "enc_Vel_raw"
+        "Time_ms", "com_Pos_mm", "enc_Pos_mm",
+        "com_Vel_mm_per_s", "enc_Vel_raw"
     ])
 
     # 시간 [s]
     df["Time_s"] = df["Time_ms"] / 1000.0
 
     # --- 윈도우 기반 속도 추정 (encoder position -> velocity) ---
-    # enc_Pos_deg를 roll_window 샘플 차분으로 속도로 계산
     if roll_window > 1:
-        df["enc_Vel_deg_per_s"] = (
-            df["enc_Pos_deg"].diff(roll_window) / df["Time_s"].diff(roll_window)
+        df["enc_Vel_mm_per_s"] = (
+            df["enc_Pos_mm"].diff(roll_window) / df["Time_s"].diff(roll_window)
         )
-        # 중간 NaN 보간
-        df["enc_Vel_deg_per_s"] = df["enc_Vel_deg_per_s"].interpolate().fillna(method="bfill").fillna(method="ffill")
+        df["enc_Vel_mm_per_s"] = df["enc_Vel_mm_per_s"].interpolate().fillna(method="bfill").fillna(method="ffill")
     else:
-        df["enc_Vel_deg_per_s"] = df["enc_Pos_deg"].diff() / df["Time_s"].diff()
+        df["enc_Vel_mm_per_s"] = df["enc_Pos_mm"].diff() / df["Time_s"].diff()
 
-    # --- 플롯 ---
-    plt.figure(figsize=(10, 5))
+    # --- Figure & Subplot ---
+    plt.figure(figsize=(8, 4))
 
-    # 속도 곡선
+    # (1) 속도 그래프
     plt.subplot(2, 1, 1)
-    plt.plot(df["Time_s"], df["com_Vel_deg_per_s"], "--", label="com_vel[deg/s]")
-    plt.plot(df["Time_s"], df["enc_Vel_deg_per_s"], label=f"enc_vel[deg/s] (avg win={roll_window})")
-    plt.ylabel("Angular Velocity [deg/s]")
+    plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"], label="Commanded Velocity", linestyle="--")
+    plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"], label=f"Encoder Velocity (win={roll_window})", alpha=0.8)
+    plt.ylabel("Velocity [mm/s]")
     plt.legend()
-    plt.grid(True)
+    plt.grid()
 
-    # 위치 곡선
+    # (2) 위치 그래프
     plt.subplot(2, 1, 2)
-    plt.plot(df["Time_s"], df["com_Pos_deg"], label="com_pos[deg]")
-    plt.plot(df["Time_s"], df["enc_Pos_deg"], label="enc_pos[deg]")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Angle [deg]")
+    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position")
+    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position", alpha=0.8)
+    plt.xlabel("Time [ms]")
+    plt.ylabel("Position [mm]")
     plt.legend()
-    plt.grid(True)
+    plt.grid()
 
     plt.suptitle(f"{title} | motor={motor_id}, steps={steps}, shape={shape}")
     plt.tight_layout()
