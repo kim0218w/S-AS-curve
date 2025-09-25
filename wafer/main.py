@@ -30,7 +30,7 @@ def main():
             direction = input("모터 방향 입력 (f: forward / b: backward): ").strip().lower()
             total_time = float(input("총 이동 시간 입력 [초, 0.5~30]: ").strip())
 
-            # 예: 가속 20%, 감속 40%, 나머지 정속
+            # 가속 20%, 감속 40%, 나머지 정속
             t_acc = total_time * 0.2
             t_dec = total_time * 0.4
             t_const = total_time - t_acc - t_dec
@@ -38,7 +38,6 @@ def main():
                 raise ValueError("가속+감속 시간이 전체 시간보다 짧아야 합니다.")
 
             print(f"[INFO] 가속={t_acc:.2f}s, 정속={t_const:.2f}s, 감속={t_dec:.2f}s (자동 계산됨)")
-
 
             data_log = run_motor_ascurve(
                 gpio, encoder, motor_id, direction, move_steps, v_max, total_time, t_acc, t_dec
@@ -61,14 +60,8 @@ def main():
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
-        try:
-            encoder.stop()
-        except:
-            pass
-        try:
-            gpio.cleanup()
-        except:
-            pass
+        encoder.stop()
+        gpio.cleanup()
 
 
 if __name__ == "__main__":
