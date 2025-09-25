@@ -13,7 +13,7 @@ STEP_PIN = 21
 ENA_PIN = 16
 ENCODER_A_PIN = 3
 ENCODER_B_PIN = 2
-ENCODER_INVERT = False
+ENCODER_INVERT = True # 엔코더 방향 설정 (True: 역방향, False: 정방향)
 
 
 # -------------------- GPIO Helper --------------------
@@ -56,6 +56,7 @@ class GPIOHelper:
 # -------------------- Encoder --------------------
 class Encoder:
     def __init__(self):
+        self.gpio = GPIOHelper()
         self.position = 0
         self.sim = True
         self._stop = False
