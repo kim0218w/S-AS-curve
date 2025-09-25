@@ -209,6 +209,22 @@ def move_stepper_scurve_with_logging(
     deg_per_step=0.018,   # 🔧 추가(기본값): 기존 호출과 호환
 ):
     # ... (생략: 기존 안전가드/enable/방향/ff_delays 생성 동일)
+    # --- Feedforward delay 시퀀스 생성 ---
+    accel_steps = int(total_steps * accel_ratio)
+    decel_steps = accel_steps
+    const_steps = total_steps - accel_steps - decel_steps
+    if const_steps < 0:
+        accel_steps = total_steps // 2
+        decel_steps = total_steps - accel_steps
+        const_steps = 0
+
+    ff_delays = []
+    for i in range(accel_steps):
+        ff_delays.append(smooth_cos_delay(i, max(accel_steps, 1), min_delay, max_delay))
+    for _ in range(const_steps):
+        ff_delays.append(min_delay)
+    for i in range(decel_steps):
+        ff_delays.append(smooth_cos_delay(decel_steps - 1 - i, max(decel_steps, 1), min_delay, max_delay))
 
     # --- 실행 + 로깅 ---
     t0 = time.monotonic()
