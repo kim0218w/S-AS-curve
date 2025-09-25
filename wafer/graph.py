@@ -36,7 +36,8 @@ def plot_scurve_params(result: dict):
 # -------------------- 실행 로그 그래프 --------------------
 def plot_scurve_logs(data_log: list):
     """
-    data_log: [[t_ms, com_pos, enc_pos, com_vel, enc_vel], ...]
+    data_log: [[t_ms, com_pos_mm, enc_pos_mm, com_vel_mm, enc_vel_mm], ...]
+    com_pos_mm / com_vel_mm 은 None 이거나 0 이어도 됨
     """
     df = pd.DataFrame(data_log, columns=[
         "Time_ms", "com_Pos_mm", "enc_Pos_mm",
@@ -47,7 +48,8 @@ def plot_scurve_logs(data_log: list):
 
     # 속도 그래프
     plt.subplot(2, 1, 1)
-    plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"], "--", label="com_Vel")
+    if "com_Vel_mm_per_s" in df:
+        plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"], "--", label="com_Vel")
     plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"], label="enc_Vel")
     plt.ylabel("Velocity [mm/s]")
     plt.legend()
@@ -55,7 +57,8 @@ def plot_scurve_logs(data_log: list):
 
     # 위치 그래프
     plt.subplot(2, 1, 2)
-    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="com_Pos")
+    if "com_Pos_mm" in df:
+        plt.plot(df["Time_ms"], df["com_Pos_mm"], label="com_Pos")
     plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="enc_Pos")
     plt.xlabel("Time [ms]")
     plt.ylabel("Position [mm]")
