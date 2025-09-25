@@ -58,14 +58,27 @@ class GPIOHelper:
                 self.h = None
                 print("[GPIO] 초기화 실패 → 시뮬레이션 모드")
 
-    def _claim_output(self, pin):
+    def _claim_output(self, pin, init_val=0):
         if self.sim or pin in self._claimed:
             return
         try:
-            lgpio.gpio_claim_output(self.h, pin)
+            # ⚠️ 정식 시그니처: (handle, lFlags, gpio, value)
+            lgpio.gpio_claim_output(self.h, 0, pin, init_val)
             self._claimed.add(pin)
-        except Exception:
+        except Exception as e:
             self.sim = True
+            print(f"[GPIO] 출력 claim 실패(pin={pin}): {e} → 시뮬레이션 모드 전환")
+
+    def _claim_input(self, pin):
+        if self.sim or pin in self._claimed:
+            return
+        try:
+            # ⚠️ 정식 시그니처: (handle, lFlags, gpio)
+            lgpio.gpio_claim_input(self.h, 0, pin)
+            self._claimed.add(pin)
+        except Exception as e:
+            self.sim = True
+            print(f"[GPIO] 입력 claim 실패(pin={pin}): {e} → 시뮬레이션 모드 전환")
 
     def write(self, pin, val):
         if self.sim: return
@@ -83,29 +96,18 @@ class GPIOHelper:
         time.sleep(low_time_s)
 
     def enable_motor(self, ena_pin, enable=True):
-        """
-        A4988 기준: Enable LOW가 모터 활성화
-        """
-        if self.sim:
-            return
-        self._claim_output(ena_pin)
+        # A4988: Enable LOW 활성
+        if self.sim: return
+        self._claim_output(ena_pin, init_val=1)  # 초기값 HIGH(Disable)로 잡고
         lgpio.gpio_write(self.h, ena_pin, 0 if enable else 1)
 
     def set_dir(self, dir_pin, forward=True):
-        """
-        DIR 핀 방향 설정
-        """
-        if self.sim:
-            return
+        if self.sim: return
         self._claim_output(dir_pin)
         lgpio.gpio_write(self.h, dir_pin, 1 if forward else 0)
 
     def queue_pulse(self, step_pin, half_period_s):
-        """
-        Sleep 기반 '한 스텝' 펄스
-        """
         if self.sim:
-            # 시뮬레이션 모드에서는 단순 sleep
             time.sleep(2 * half_period_s)
             return
         self._claim_output(step_pin)
@@ -113,13 +115,6 @@ class GPIOHelper:
         time.sleep(half_period_s)
         lgpio.gpio_write(self.h, step_pin, 0)
         time.sleep(half_period_s)
-
-    def cleanup(self):
-        if not self.sim and self.h:
-            try:
-                lgpio.gpiochip_close(self.h)
-            except Exception:
-                pass
 
 # -------------------- Initialize --------------------
 gpio = GPIOHelper()
