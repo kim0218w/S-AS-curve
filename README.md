@@ -5,3 +5,4 @@ Encoder : I2C - AS5600 아님
 
 
 
+[ERROR] plot_results() got an unexpected keyword argument 'motor_id'
