@@ -149,13 +149,27 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
 # -------------------- Run Motor with AS-Curve --------------------
 def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
                       total_steps: int, v_max: float,
-                      t_acc: float = None, t_dec: float = None, total_time: float = None):
+                      shape: str = "mid", t_acc: float = None, t_dec: float = None, total_time: float = None):
 
     if total_time is None:
         total_time = (2 * total_steps) / v_max
+
+    # shape에 따라 자동 분배
     if t_acc is None or t_dec is None:
-        t_acc = total_time * 0.2
-        t_dec = total_time * 0.4
+        if shape == "short":
+            t_acc = total_time * 0.4
+            t_dec = total_time * 0.6
+            t_const = 0
+        elif shape == "long":
+            t_acc = total_time * 0.15
+            t_dec = total_time * 0.25
+            t_const = total_time - t_acc - t_dec
+        else:  # mid
+            t_acc = total_time * 0.2
+            t_dec = total_time * 0.4
+            t_const = total_time - t_acc - t_dec
+    else:
+        t_const = total_time - t_acc - t_dec
 
     gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
