@@ -36,21 +36,6 @@ def calc_scurve_params(total_steps=None, v_max=None, total_time=None, show=True)
 
     return result
 
-
-# -------------------- Profile --------------------
-def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
-    if total_time <= 0:
-        return 0.0
-    return v_max * (np.sin(np.pi * t / total_time))**2
-
-
-# -------------------- Run Motor --------------------
-import time
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
-
 # -------------------- Profile --------------------
 def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
     if total_time <= 0:
@@ -117,3 +102,4 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
         data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
 
     return data_log
+
