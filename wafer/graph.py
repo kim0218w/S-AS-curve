@@ -3,7 +3,11 @@ import csv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.signal import savgol_filter, butter, filtfilt
+try:
+    from scipy.signal import savgol_filter, butter, filtfilt
+    _HAS_SCIPY = True
+except Exception:
+    _HAS_SCIPY = False
 
 # -------------------- CSV 저장 --------------------
 def save_csv(data_log, filename="scurve_run.csv", pitch_mm=5.0, **meta):
@@ -39,88 +43,68 @@ def plot_results(
     pitch_mm=5.0,          # 1회전 당 이동(mm)
     step_angle_deg=1.8,    # 보통 1.8°
     microstep=16,          # 마이크로스텝
-    smooth_method="savgol",# "savgol" | "butter" | "regress"
-    smooth_ms=80,          # 대역평활 기준 창 길이(ms) ≈ 50~150ms 권장
-    polyorder=3            # savgol 다항 차수(2~3)
+    smooth_method="savgol",# "savgol" | "butter" | "regress" | "none"
+    smooth_ms=80,          # 평활 창 길이(ms)
+    polyorder=3
 ):
-    """
-    그래프는 RPS 단위로 그립니다.
-    - com_Vel_mm_per_s → com_RPS
-    - enc_Pos_mm → 매끄럽게 미분해 enc_RPS
-    - 필요시 RPM으로 바꿔 보고 싶으면 RPS*60 쓰면 됩니다.
-    """
-
-    # DataFrame 변환
+    # ---------------- DataFrame ----------------
     df = pd.DataFrame(data_log, columns=[
         "Time_ms", "com_Pos_mm", "enc_Pos_mm", "com_Vel_mm_per_s", "enc_Vel_raw"
     ])
     df["Time_s"] = df["Time_ms"] / 1000.0
 
-    # 표본 간격 추정
-    if len(df) < 5:
+    if len(df) < 3:
         raise ValueError("데이터가 너무 적습니다.")
-    dt = np.median(np.diff(df["Time_s"]))  # seconds/sample
+
+    # 표본 간격
+    t = df["Time_s"].to_numpy()
+    pos = df["enc_Pos_mm"].to_numpy()
+    dt = np.median(np.diff(t))
     if not np.isfinite(dt) or dt <= 0:
         raise ValueError("시간 축이 올바르지 않습니다.")
-    fs = 1.0 / dt  # Hz
+    fs = 1.0 / dt
 
-     # mm/s -> RPS
-    df["enc_RPS"] = (vel_mm_s / pitch_mm) if (pitch_mm and pitch_mm != 0) else np.nan
-    df["enc_RPS"] = np.abs(df["enc_RPS"])   #  음수 제거
-    df["com_RPS"] = np.abs(df["com_Vel_mm_per_s"] / pitch_mm)
-
-    # ----- 엔코더 위치 기반 속도(RPS) 추정 -----
-    pos = df["enc_Pos_mm"].to_numpy()
-
+    # ----- 엔코더 위치 기반 속도(mm/s) 추정 -----
     if smooth_method == "savgol":
-        # Savitzky–Golay로 위치를 직접 미분: 1차 미분 = mm/s
         win_len_samples = max(5, int(round((smooth_ms/1000.0) * fs)) | 1)  # 홀수
-        # 창 길이가 데이터보다 길면 줄이기
         win_len_samples = min(win_len_samples, len(pos) - (1 - len(pos)%2))
         if win_len_samples < 5: win_len_samples = 5
         if win_len_samples % 2 == 0: win_len_samples += 1
-        vel_mm_s = savgol_filter(pos, window_length=win_len_samples, polyorder=polyorder, deriv=1, delta=dt)
+        vel_mm_s = savgol_filter(
+            pos, window_length=win_len_samples, polyorder=polyorder,
+            deriv=1, delta=dt
+        )
     elif smooth_method == "butter":
-        # 저역통과 후 미분 (권장 컷오프: 5~15 Hz 근처 시도)
-        cutoff_hz = max(2.0, 10.0)  # 필요시 조정
+        cutoff_hz = max(2.0, 10.0)
         b, a = butter(N=3, Wn=cutoff_hz/(fs*0.5), btype='low')
         pos_f = filtfilt(b, a, pos, method="gust")
-        vel_mm_s = np.gradient(pos_f, df["Time_s"])  # 안정적 수치미분
+        vel_mm_s = np.gradient(pos_f, df["Time_s"])
     elif smooth_method == "regress":
-        # 창 회귀(선형회귀)로 기울기(mm/s) 추정
         win_len_samples = max(5, int(round((smooth_ms/1000.0) * fs)))
         if win_len_samples % 2 == 0: win_len_samples += 1
         half = win_len_samples // 2
         vel_mm_s = np.full_like(pos, np.nan, dtype=float)
-        t = df["Time_s"].to_numpy()
         for i in range(half, len(pos)-half):
             ti = t[i-half:i+half+1]
             yi = pos[i-half:i+half+1]
-            # y = a*t + b → a가 속도(mm/s)
             A = np.vstack([ti, np.ones_like(ti)]).T
             a, b = np.linalg.lstsq(A, yi, rcond=None)[0]
             vel_mm_s[i] = a
-        # 양끝 보간
-        s = pd.Series(vel_mm_s).interpolate().bfill().ffill().to_numpy()
-        vel_mm_s = s
+        vel_mm_s = pd.Series(vel_mm_s).interpolate().bfill().ffill().to_numpy()
     else:
-        raise ValueError("smooth_method는 'savgol' | 'butter' | 'regress' 중 하나여야 합니다.")
+        vel_mm_s = np.gradient(pos, df["Time_s"])  # fallback
 
-    # mm/s -> RPS
-    df["enc_RPS"] = (vel_mm_s / pitch_mm) if (pitch_mm and pitch_mm != 0) else np.nan
+    # ----- mm/s -> RPS (항상 양수로) -----
+    df["enc_RPS"] = np.abs(vel_mm_s / pitch_mm) if (pitch_mm and pitch_mm != 0) else np.nan
+    df["com_RPS"] = np.abs(df["com_Vel_mm_per_s"] / pitch_mm)
 
-    # (선택) 펄스 Hz 및 RPM도 보고 싶다면
-    steps_per_rev = (360.0/step_angle_deg) * microstep  # 보통 200*microstep
+    # ----- 추가 계산 (RPM, 펄스 Hz) -----
+    steps_per_rev = (360.0/step_angle_deg) * microstep
     df["enc_RPM"] = df["enc_RPS"] * 60.0
     df["Pulse_Hz"] = df["enc_RPS"] * steps_per_rev
     df["com_RPM"]  = df["com_RPS"] * 60.0
 
-    # ----- Plot: 고주파 시야 줄이기 위해 표시용 다운샘플(선택) -----
-    # 시각화 시 흔들림이 심하면 보기용으로만 다운샘플
-    show_every = max(1, int(fs * 0.01))  # ~10ms당 1점 표시
-    idx = np.arange(0, len(df), show_every)
-
-     # ----- Plot -----
+    # ----- Plot -----
     plt.figure(figsize=(8, 6))
 
     # (1) 속도 그래프 (RPS)
