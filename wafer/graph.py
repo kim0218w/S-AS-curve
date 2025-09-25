@@ -9,10 +9,11 @@ try:
 except Exception:
     _HAS_SCIPY = False
 
+
 # -------------------- CSV 저장 --------------------
 def save_csv(data_log, filename="scurve_run.csv", pitch_mm=5.0, **meta):
     """
-    enc_vel을 RPS 값으로 저장합니다.
+    enc_vel을 RPM 값으로 저장합니다.
     data_log: [Time_ms, com_Pos_mm, enc_Pos_mm, com_Vel_mm_per_s, enc_Vel_raw]
               여기서 enc_Vel_raw는 mm/s 라고 가정
     pitch_mm: 1회전 당 이송 거리(mm)
@@ -24,13 +25,13 @@ def save_csv(data_log, filename="scurve_run.csv", pitch_mm=5.0, **meta):
         # 헤더
         writer.writerow([
             "Time_ms", "com_Pos_mm", "enc_Pos_mm",
-            "com_Vel_mm_per_s", "enc_Vel_RPS"  # enc_vel은 RPS로 기록
+            "com_Vel_mm_per_s", "enc_Vel_RPM"  # enc_vel은 RPM으로 기록
         ])
         for row in data_log:
             Time_ms, com_Pos_mm, enc_Pos_mm, com_Vel_mm_per_s, enc_Vel_raw = row
-            # enc_Vel_raw(mm/s) -> RPS
-            enc_Vel_RPS = (enc_Vel_raw / pitch_mm) if (pitch_mm and pitch_mm != 0) else np.nan
-            writer.writerow([Time_ms, com_Pos_mm, enc_Pos_mm, com_Vel_mm_per_s, enc_Vel_RPS])
+            # enc_Vel_raw(mm/s) -> RPM
+            enc_Vel_RPM = ((enc_Vel_raw / pitch_mm) * 60.0) if (pitch_mm and pitch_mm != 0) else np.nan
+            writer.writerow([Time_ms, com_Pos_mm, enc_Pos_mm, com_Vel_mm_per_s, enc_Vel_RPM])
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
     return filepath
 
@@ -47,6 +48,12 @@ def plot_results(
     smooth_ms=80,          # 평활 창 길이(ms)
     polyorder=3
 ):
+    """
+    그래프는 RPM 단위로 그립니다.
+    - com_Vel_mm_per_s → com_RPM
+    - enc_Pos_mm → 매끄럽게 미분해 enc_RPM
+    """
+
     # ---------------- DataFrame ----------------
     df = pd.DataFrame(data_log, columns=[
         "Time_ms", "com_Pos_mm", "enc_Pos_mm", "com_Vel_mm_per_s", "enc_Vel_raw"
@@ -67,7 +74,7 @@ def plot_results(
     # ----- 엔코더 위치 기반 속도(mm/s) 추정 -----
     if smooth_method == "savgol":
         win_len_samples = max(5, int(round((smooth_ms/1000.0) * fs)) | 1)  # 홀수
-        win_len_samples = min(win_len_samples, len(pos) - (1 - len(pos)%2))
+        win_len_samples = min(win_len_samples, len(pos) - (1 - len(pos) % 2))
         if win_len_samples < 5: win_len_samples = 5
         if win_len_samples % 2 == 0: win_len_samples += 1
         vel_mm_s = savgol_filter(
@@ -75,7 +82,7 @@ def plot_results(
             deriv=1, delta=dt
         )
     elif smooth_method == "butter":
-        cutoff_hz = max(2.0, 10.0)
+        cutoff_hz = 10.0  # 필요시 조정
         b, a = butter(N=3, Wn=cutoff_hz/(fs*0.5), btype='low')
         pos_f = filtfilt(b, a, pos, method="gust")
         vel_mm_s = np.gradient(pos_f, df["Time_s"])
@@ -94,30 +101,29 @@ def plot_results(
     else:
         vel_mm_s = np.gradient(pos, df["Time_s"])  # fallback
 
-    # ----- mm/s -> RPS (부호 유지) -----
+    # ----- mm/s -> RPM (부호 유지) -----
     if pitch_mm and pitch_mm != 0:
-        df["enc_RPS"] = vel_mm_s / pitch_mm
-        df["com_RPS"] = df["com_Vel_mm_per_s"] / pitch_mm
+        df["enc_RPM"] = (vel_mm_s / pitch_mm) * 60.0
+        df["com_RPM"] = (df["com_Vel_mm_per_s"] / pitch_mm) * 60.0
     else:
-        df["enc_RPS"] = np.nan
-        df["com_RPS"] = np.nan
-
-    # ----- 추가 계산 (RPM, 펄스 Hz) -----
-    steps_per_rev = (360.0/step_angle_deg) * microstep
-    df["enc_RPM"] = df["enc_RPS"] * 60.0
-    df["Pulse_Hz"] = df["enc_RPS"] * steps_per_rev
-    df["com_RPM"]  = df["com_RPS"] * 60.0
+        df["enc_RPM"] = np.nan
+        df["com_RPM"] = np.nan
 
     # ----- Plot -----
     plt.figure(figsize=(8, 6))
 
-    # (1) 속도 그래프 (RPS)
+    # (1) 속도 그래프 (RPM)
     plt.subplot(2, 1, 1)
-    plt.plot(df["Time_ms"], df["com_RPS"], label="Commanded (RPS)", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_RPS"], label=f"Encoder (RPS) [{smooth_method}]")
-    plt.ylabel("Speed [RPS]")
+    plt.plot(df["Time_ms"], df["com_RPM"], label="Commanded (RPM)", linestyle="--")
+    plt.plot(df["Time_ms"], df["enc_RPM"], label=f"Encoder (RPM) [{smooth_method}]")
+    plt.ylabel("Speed [RPM]")
     plt.legend()
     plt.grid(True)
+
+    # 여기서 y축 고정 (질문 주신 코드)
+    rpm_min = 0
+    rpm_max = max(df["enc_RPM"].max(), df["com_RPM"].max())
+    plt.ylim(rpm_min, rpm_max * 1.1)
 
     # (2) 위치 그래프
     plt.subplot(2, 1, 2)
