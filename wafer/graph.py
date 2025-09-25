@@ -10,24 +10,20 @@ except Exception:
     _HAS_SCIPY = False
 
 
-def save_csv(data_log, filename="scurve_run.csv", pitch_mm=5.0, **meta):
+# -------------------- CSV 저장 --------------------
+def save_csv(df, filename="scurve_run.csv"):
+    """
+    그래프에 쓰인 com_RPM, enc_RPM 값을 그대로 CSV로 저장
+    df: plot_results()에서 반환된 DataFrame
+    """
     os.makedirs("logs", exist_ok=True)
     filepath = os.path.join("logs", filename)
-    with open(filepath, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "Time_ms", "com_Pos_mm", "enc_Pos_mm",
-            "com_Vel_mm_per_s", "com_RPM", "enc_RPM"
-        ])
-        for row in data_log:
-            Time_ms, com_Pos_mm, enc_Pos_mm, com_Vel_mm_per_s, enc_Vel_raw = row
-            com_RPM = (com_Vel_mm_per_s / pitch_mm) * 60.0 if pitch_mm else np.nan
-            enc_RPM = (enc_Vel_raw / pitch_mm) * 60.0 if pitch_mm else np.nan
-            writer.writerow([Time_ms, com_Pos_mm, enc_Pos_mm, com_Vel_mm_per_s, com_RPM, enc_RPM])
+    df.to_csv(filepath, index=False)
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
     return filepath
 
 
+# -------------------- 실제 데이터 기반 플롯 --------------------
 def plot_results(
     data_log,
     title="S-Curve Motion",
@@ -73,14 +69,10 @@ def plot_results(
         scale = df["com_RPM"].max() / df["enc_RPM"].max()
         df["enc_RPM"] *= scale
 
-    # (선택) 오프셋 보정도 하고 싶다면 ↓
-    # offset = df["com_RPM"].mean() - df["enc_RPM"].mean()
-    # df["enc_RPM"] += offset
-
     # --- Plot ---
     plt.figure(figsize=(8, 6))
 
-    # 속도 그래프 (Commanded vs Encoder)
+    # 속도 그래프
     plt.subplot(2, 1, 1)
     plt.plot(df["Time_ms"], df["com_RPM"], label="Commanded (RPM)", linestyle="--")
     plt.plot(df["Time_ms"], df["enc_RPM"], label=f"Encoder (RPM, scaled) [{smooth_method}]")
