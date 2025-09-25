@@ -41,37 +41,46 @@ def save_csv(df_or_list, filename="scurve_run.csv", **meta):
 
 
 # -------------------- 실제 데이터 기반 플롯 --------------------
-def plot_results(csv_path="logs/scurve_run.csv", title="S-curve Motion"):
+def plot_results(data_or_path, title="S-curve Motion", **meta):
     """
-    run_motor_scurve 에서 기록된 CSV를 불러와 Commanded vs Encoder 비교 그래프 출력.
-    - Time_ms : ms 단위 시간
-    - com_Vel_mm_per_s : 명령 속도 (mm/s)
-    - enc_Vel_mm_per_s : EncoderVelEstimator 기반 추정 속도 (mm/s)
-    - com_Pos_mm / enc_Pos_mm : 위치 비교
+    data_or_path : list (data_log) 또는 str (CSV 경로)
+    - list: run_motor_scurve() 반환값
+    - str : 저장된 CSV 파일 경로
     """
-    df = pd.read_csv(csv_path)
+
+    if isinstance(data_or_path, str):
+        df = pd.read_csv(data_or_path)
+    elif isinstance(data_or_path, list):
+        df = pd.DataFrame(data_or_path, columns=[
+            "Time_ms", "com_Pos_mm", "enc_Pos_mm",
+            "com_Vel_mm_per_s", "enc_Vel_mm_per_s"
+        ])
+    else:
+        raise ValueError(f"지원하지 않는 입력 타입: {type(data_or_path)}")
 
     plt.figure(figsize=(8, 6))
 
     # --- 속도 비교 ---
     plt.subplot(2, 1, 1)
     plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"],
-             label="Commanded (mm/s)", linestyle="--")
+             label="Commanded Velocity [mm/s]", linestyle="--")
     plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"],
-             label="Encoder (mm/s, filtered)", alpha=0.8)
+             label="Encoder Velocity [mm/s]", alpha=0.8)
     plt.ylabel("Velocity [mm/s]")
-    plt.legend()
-    plt.grid(True)
+    plt.legend(); plt.grid(True)
 
     # --- 위치 비교 ---
     plt.subplot(2, 1, 2)
-    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position")
-    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position", alpha=0.8)
-    plt.xlabel("Time [ms]")
-    plt.ylabel("Position [mm]")
-    plt.legend()
-    plt.grid(True)
+    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position [mm]")
+    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position [mm]", alpha=0.8)
+    plt.xlabel("Time [ms]"); plt.ylabel("Position [mm]")
+    plt.legend(); plt.grid(True)
 
-    plt.suptitle(title)
+    if meta:
+        sub = ", ".join(f"{k}={v}" for k, v in meta.items())
+        plt.suptitle(f"{title} | {sub}")
+    else:
+        plt.suptitle(title)
+
     plt.tight_layout()
     plt.show()
