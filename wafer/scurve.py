@@ -1,3 +1,52 @@
+import time
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from encoder import DIR_PIN, STEP_PIN, ENA_PIN
+
+
+# -------------------- Parameter Calculator --------------------
+def calc_scurve_params(total_steps=None, v_max=None, total_time=None, show=True):
+    if [total_steps, v_max, total_time].count(None) != 1:
+        raise ValueError("세 변수 중 정확히 2개만 지정해야 합니다.")
+
+    if total_steps is None:
+        total_steps = int((v_max * total_time) / 2)
+    elif v_max is None:
+        v_max = (2 * total_steps) / total_time
+    elif total_time is None:
+        total_time = (2 * total_steps) / v_max
+
+    result = {"total_steps": total_steps, "v_max": v_max, "total_time": total_time}
+
+    if show:
+        print("[S-curve Parameters]")
+        print(result, "\n")
+        df = pd.DataFrame([result])
+        print(df)
+
+        t = np.linspace(0, total_time, 500)
+        v = v_max * (np.sin(np.pi * t / total_time))**2
+        plt.figure()
+        plt.plot(t, v, label="S-curve velocity")
+        plt.xlabel("Time [s]")
+        plt.ylabel("Velocity [steps/s]")
+        plt.grid()
+        plt.legend()
+        plt.show()
+
+    return result
+
+
+# -------------------- Profile --------------------
+def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
+    if total_time <= 0:
+        return 0.0
+    return v_max * (np.sin(np.pi * t / total_time))**2
+
+
+# -------------------- Run Motor --------------------
 def run_motor_scurve(gpio, encoder, direction: str, total_steps: int, v_max: float, total_time: float):
     STEPS_PER_REV = 200
     MICROSTEP = 16
