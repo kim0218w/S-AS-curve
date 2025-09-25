@@ -15,37 +15,28 @@ def main():
             v_max = float(input("Vmax 입력 [steps/s]: ").strip())
             move_steps = int(input("이동할 스텝 수 입력 [예: 10000 = 180°]: ").strip())
             direction = input("모터 방향 입력 (f: forward / b: backward): ").strip().lower()
-            total_time = float(input("총 이동 시간 입력 [초, 0.5~30]: ").strip())
+            shape = input("S-curve 형태 선택 (short/mid/long, 기본=mid): ").strip().lower() or "mid"
 
             print(f"[INFO] S-curve 실행 → steps={move_steps}, Vmax={v_max} [steps/s], "
-                  f"duration={total_time:.2f}s, motor={motor_id}, dir={direction}")
+                  f"motor={motor_id}, dir={direction}, shape={shape}")
 
             data_log = run_motor_scurve(
-                gpio, encoder, motor_id, direction, move_steps, v_max, total_time
+                gpio, encoder, motor_id, direction, move_steps, v_max, shape=shape
             )
             filepath = save_csv(data_log)
-            plot_results(data_log, title="S-Curve Motion")
+            plot_results(data_log, title=f"S-Curve Motion ({shape})")
 
         elif mode == "2":  # AS-curve 실행
             motor_id = int(input("모터 선택 (17 또는 23): ").strip())
             v_max = float(input("Vmax 입력 [steps/s]: ").strip())
             move_steps = int(input("이동할 스텝 수 입력 [예: 10000 = 180°]: ").strip())
             direction = input("모터 방향 입력 (f: forward / b: backward): ").strip().lower()
-            total_time = float(input("총 이동 시간 입력 [초, 0.5~30]: ").strip())
-
-            # 가속 20%, 감속 40%, 나머지 정속
-            t_acc = total_time * 0.2
-            t_dec = total_time * 0.4
-            t_const = total_time - t_acc - t_dec
-            if t_const < 0:
-                raise ValueError("가속+감속 시간이 전체 시간보다 짧아야 합니다.")
 
             print(f"[INFO] AS-curve 실행 → steps={move_steps}, Vmax={v_max} [steps/s], "
-                  f"duration={total_time:.2f}s, motor={motor_id}, dir={direction}")
-            print(f"        가속={t_acc:.2f}s, 정속={t_const:.2f}s, 감속={t_dec:.2f}s")
+                  f"motor={motor_id}, dir={direction}")
 
             data_log = run_motor_ascurve(
-                gpio, encoder, motor_id, direction, move_steps, v_max, total_time, t_acc, t_dec
+                gpio, encoder, motor_id, direction, move_steps, v_max
             )
             filepath = save_csv(data_log)
             plot_results(data_log, title="AS-Curve Motion")
