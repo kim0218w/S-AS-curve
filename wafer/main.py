@@ -2,7 +2,6 @@ from encoder import GPIOHelper, Encoder
 from scurve import run_motor_scurve, calc_scurve_params
 from graph import save_csv, plot_results
 
-
 def main():
     gpio = GPIOHelper()
     encoder = Encoder(gpio)
@@ -10,12 +9,15 @@ def main():
     try:
         mode = input("실행 모드 선택 (1: 모터 실행, 2: 파라미터 계산): ").strip()
         if mode == "1":
-            v_max = float(input("Vmax 입력 [100~5000]: ").strip())
+            motor_id = int(input("모터 선택 (17 또는 23): ").strip())
+            v_max = float(input("Vmax 입력 [100~5000 steps/s]: ").strip())
             move_steps = int(input("이동할 스텝 수 입력 [100~10000]: ").strip())
-            direction = input("모터 방향 입력 (f/b): ").strip().lower()
+            direction = input("모터 방향 입력 (f: forward / b: backward): ").strip().lower()
             total_time = float(input("총 이동 시간 입력 [초, 0.5~30]: ").strip())
 
-            data_log = run_motor_scurve(gpio, encoder, direction, move_steps, v_max, total_time)
+            data_log = run_motor_scurve(
+                gpio, encoder, motor_id, direction, move_steps, v_max, total_time
+            )
             filepath = save_csv(data_log)
             plot_results(data_log)
 
@@ -37,7 +39,6 @@ def main():
         except: pass
         try: gpio.cleanup()
         except: pass
-
 
 if __name__ == "__main__":
     main()
