@@ -1,174 +1,64 @@
-import time
-import numpy as np
+import os
+import csv
 import pandas as pd
 import matplotlib.pyplot as plt
 
 
-# -------------------- Parameter Calculator --------------------
-def calc_scurve_params(total_steps=None, v_max=None, total_time=None, show=True):
-    if [total_steps, v_max, total_time].count(None) != 1:
-        raise ValueError("세 변수 중 정확히 2개만 지정해야 합니다.")
-
-    if total_steps is None:
-        total_steps = int((v_max * total_time) / 2)
-    elif v_max is None:
-        v_max = (2 * total_steps) / total_time
-    elif total_time is None:
-        total_time = (2 * total_steps) / v_max
-
-    result = {"total_steps": total_steps, "v_max": v_max, "total_time": total_time}
-
-    if show:
-        print("[S-curve Parameters]")
-        print(result, "\n")
-        df = pd.DataFrame([result])
-        print(df)
-
-        t = np.linspace(0, total_time, 500)
-        v = v_max * (np.sin(np.pi * t / total_time))**2
-        plt.figure()
-        plt.plot(t, v, label="S-curve velocity")
-        plt.xlabel("Time [s]")
-        plt.ylabel("Velocity [steps/s]")
-        plt.grid()
-        plt.legend()
-        plt.show()
-
-    return result
+def save_csv(data_log, filename="scurve_run.csv"):
+    os.makedirs("logs", exist_ok=True)
+    filepath = os.path.join("logs", filename)
+    with open(filepath, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "Time_ms", "com_Angle_deg", "enc_Angle_deg",
+            "com_Vel_deg_per_s", "enc_Vel_deg_per_s"
+        ])
+        writer.writerows(data_log)
+    print(f"-- 실행 완료! CSV 저장: {filepath} --")
+    return filepath
 
 
-# -------------------- Velocity Profiles --------------------
-def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
-    """대칭 S-curve 속도"""
-    if total_time <= 0:
-        return 0.0
-    return v_max * (np.sin(np.pi * t / total_time))**2
+def plot_results(data_log, save_png=True, title="Stepper Motor Motion (S/AS-Curve)"):
+    if not data_log:
+        print("[WARN] 데이터가 비어 있어서 그래프를 그릴 수 없습니다.")
+        return
 
+    df = pd.DataFrame(data_log, columns=[
+        "Time_ms", "com_Angle_deg", "enc_Angle_deg",
+        "com_Vel_deg_per_s", "enc_Vel_deg_per_s"
+    ])
+    df["Time_s"] = df["Time_ms"] / 1000.0
 
-def as_curve_velocity(t: float, v_max: float, t_acc: float, t_dec: float, total_time: float) -> float:
-    """비대칭 AS-curve 속도"""
-    t_const = total_time - t_acc - t_dec
-    if t_const < 0:
-        raise ValueError("가속+감속 시간이 전체 시간보다 짧아야 합니다.")
+    plt.figure(figsize=(12, 6))
+    plt.suptitle(title, fontsize=14, fontweight="bold")
 
-    # 가속 구간
-    if 0 <= t < t_acc:
-        return v_max * (np.sin(np.pi * t / (2 * t_acc)))**2
+    # -------------------- 속도 --------------------
+    plt.subplot(2, 1, 1)
+    plt.plot(df["Time_s"], df["com_Vel_deg_per_s"],
+             label="Commanded Angular Velocity", linestyle="--", linewidth=2)
+    plt.plot(df["Time_s"], df["enc_Vel_deg_per_s"],
+             label="Encoder Angular Velocity", alpha=0.8, linewidth=1.5)
+    plt.ylabel("Angular Velocity [deg/s]")
+    plt.legend(loc="best")
+    plt.grid(True, linestyle="--", alpha=0.6)
 
-    # 정속 구간
-    elif t_acc <= t < t_acc + t_const:
-        return v_max
+    # -------------------- 위치 --------------------
+    plt.subplot(2, 1, 2)
+    plt.plot(df["Time_s"], df["com_Angle_deg"],
+             label="Commanded Angle", linewidth=2)
+    plt.plot(df["Time_s"], df["enc_Angle_deg"],
+             label="Encoder Angle", alpha=0.8, linewidth=1.5)
+    plt.xlabel("Time [s]")
+    plt.ylabel("Angle [deg]")
+    plt.legend(loc="best")
+    plt.grid(True, linestyle="--", alpha=0.6)
 
-    # 감속 구간
-    elif t_acc + t_const <= t <= total_time:
-        tau = t - (t_acc + t_const)
-        return v_max * (np.cos(np.pi * tau / (2 * t_dec)))**2
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-    return 0.0
+    if save_png:
+        os.makedirs("logs", exist_ok=True)
+        filepath = os.path.join("logs", "last_run.png")
+        plt.savefig(filepath)
+        print(f"-- 그래프 이미지 저장: {filepath} --")
 
-
-# -------------------- Run Motor with S-Curve --------------------
-def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
-                     total_steps: int, v_max: float, total_time: float):
-    STEPS_PER_REV = 200
-    MICROSTEP = 16
-    PITCH_MM = 5.0
-    ENC_CPR = 1000
-
-    # 모터 설정
-    gpio.set_dir(motor_id, direction == 'f')
-    gpio.set_enable(motor_id, True)
-
-    moved_steps = 0
-    com_pos = 0.0
-    prev_enc = encoder.read()
-    enc_init = (prev_enc / ENC_CPR) * PITCH_MM
-    data_log = []
-    start_time = time.time()
-
-    while moved_steps < total_steps:
-        t = time.time() - start_time
-        if t > total_time:
-            break
-
-        com_vel_steps = s_curve_velocity(t, v_max, total_time)
-        if com_vel_steps < 1e-6:
-            time.sleep(0.001)
-            continue
-
-        # 펄스 간격 계산 (steps/s → s)
-        pulse_interval = 1.0 / com_vel_steps
-
-        # 안전 범위 제한 (예: 0.001초 ~ 0.05초)
-        pulse_interval = max(0.001, min(pulse_interval, 0.05))
-
-        gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
-        moved_steps += 1
-
-        com_pos = (moved_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
-
-        enc_now = encoder.read()
-        delta = enc_now - prev_enc
-        prev_enc = enc_now
-        enc_pos_mm = (enc_now / ENC_CPR) * PITCH_MM - enc_init
-        enc_vel_mm = ((delta / pulse_interval) / ENC_CPR) * PITCH_MM if delta != 0 else 0.0
-
-        t_ms = int(round(t * 1000))
-        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
-        data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
-
-    return data_log
-
-
-# -------------------- Run Motor with AS-Curve --------------------
-def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
-                      total_steps: int, v_max: float, total_time: float,
-                      t_acc: float, t_dec: float):
-    STEPS_PER_REV = 200
-    MICROSTEP = 16
-    PITCH_MM = 5.0
-    ENC_CPR = 1000
-
-    # 모터 설정
-    gpio.set_dir(motor_id, direction == 'f')
-    gpio.set_enable(motor_id, True)
-
-    moved_steps = 0
-    com_pos = 0.0
-    prev_enc = encoder.read()
-    enc_init = (prev_enc / ENC_CPR) * PITCH_MM
-    data_log = []
-    start_time = time.time()
-
-    while moved_steps < total_steps:
-        t = time.time() - start_time
-        if t > total_time:
-            break
-
-        com_vel_steps = as_curve_velocity(t, v_max, t_acc, t_dec, total_time)
-        if com_vel_steps < 1e-6:
-            time.sleep(0.001)
-            continue
-
-        # 펄스 간격 계산
-        pulse_interval = 1.0 / com_vel_steps
-
-        # 안전 범위 제한 (예: 0.001초 ~ 0.05초)
-        pulse_interval = max(0.001, min(pulse_interval, 0.05))
-
-        gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
-        moved_steps += 1
-
-        com_pos = (moved_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
-
-        enc_now = encoder.read()
-        delta = enc_now - prev_enc
-        prev_enc = enc_now
-        enc_pos_mm = (enc_now / ENC_CPR) * PITCH_MM - enc_init
-        enc_vel_mm = ((delta / pulse_interval) / ENC_CPR) * PITCH_MM if delta != 0 else 0.0
-
-        t_ms = int(round(t * 1000))
-        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
-        data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
-
-    return data_log
+    plt.show()
