@@ -96,7 +96,12 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
             time.sleep(0.001)
             continue
 
+        # 펄스 간격 계산 (steps/s → s)
         pulse_interval = 1.0 / com_vel_steps
+
+        # 안전 범위 제한 (예: 0.001초 ~ 0.05초)
+        pulse_interval = max(0.001, min(pulse_interval, 0.05))
+
         gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
         moved_steps += 1
 
@@ -145,7 +150,12 @@ def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
             time.sleep(0.001)
             continue
 
+        # 펄스 간격 계산
         pulse_interval = 1.0 / com_vel_steps
+
+        # 안전 범위 제한 (예: 0.001초 ~ 0.05초)
+        pulse_interval = max(0.001, min(pulse_interval, 0.05))
+
         gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
         moved_steps += 1
 
