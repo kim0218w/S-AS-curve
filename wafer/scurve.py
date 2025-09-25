@@ -36,36 +36,58 @@ def calc_scurve_params(total_steps=None, v_max=None, total_time=None, show=True)
 
     return result
 
-# -------------------- Profile --------------------
+
+# -------------------- S-Curve Profile --------------------
 def s_curve_velocity(t: float, v_max: float, total_time: float) -> float:
+    """대칭 S-curve 속도"""
     if total_time <= 0:
         return 0.0
     return v_max * (np.sin(np.pi * t / total_time))**2
 
 
-# -------------------- Run Motor (Pulse Interval Based) --------------------
+# -------------------- AS-Curve Profile --------------------
+def as_curve_velocity(t: float, v_max: float, t_acc: float, t_dec: float, total_time: float) -> float:
+    """비대칭 S-curve 속도"""
+    t_const = total_time - t_acc - t_dec
+    if t_const < 0:
+        raise ValueError("가속+감속 시간이 전체 시간보다 짧아야 합니다.")
+
+    # 가속 구간
+    if 0 <= t < t_acc:
+        return v_max * (np.sin(np.pi * t / (2 * t_acc)))**2
+
+    # 정속 구간
+    elif t_acc <= t < t_acc + t_const:
+        return v_max
+
+    # 감속 구간
+    elif t_acc + t_const <= t <= total_time:
+        tau = t - (t_acc + t_const)
+        return v_max * (np.cos(np.pi * tau / (2 * t_dec)))**2
+
+    return 0.0
+
+
+# -------------------- Run Motor with S-Curve --------------------
 def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
                      total_steps: int, v_max: float, total_time: float):
     """
-    motor_id: 17 or 23 (라즈베리 파이 핀 그룹 기준)
-    direction: 'f' (forward), 'b' (backward)
+    motor_id: 17 or 23
+    direction: 'f' or 'b'
     """
     STEPS_PER_REV = 200
     MICROSTEP = 16
     PITCH_MM = 5.0
     ENC_CPR = 1000
 
-    # 방향 및 Enable 설정
     gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
 
     moved_steps = 0
     com_pos = 0.0
-
     prev_enc = encoder.read()
     enc_init = (prev_enc / ENC_CPR) * PITCH_MM
     data_log = []
-
     start_time = time.time()
 
     while moved_steps < total_steps:
@@ -73,33 +95,76 @@ def run_motor_scurve(gpio, encoder, motor_id: int, direction: str,
         if t > total_time:
             break
 
-        # 현재 목표 속도 [steps/s]
         com_vel_steps = s_curve_velocity(t, v_max, total_time)
         if com_vel_steps < 1e-6:
             time.sleep(0.001)
             continue
 
-        # 속도 → 펄스 간격
         pulse_interval = 1.0 / com_vel_steps
-
-        # 모터에 펄스 출력
         gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
         moved_steps += 1
 
-        # 위치 계산 (mm)
         com_pos = (moved_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
 
-        # 엔코더 읽기
         enc_now = encoder.read()
         delta = enc_now - prev_enc
         prev_enc = enc_now
         enc_pos_mm = (enc_now / ENC_CPR) * PITCH_MM - enc_init
         enc_vel_mm = ((delta / pulse_interval) / ENC_CPR) * PITCH_MM if delta != 0 else 0.0
 
-        # 로그 저장
         t_ms = int(round(t * 1000))
         com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
         data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
 
     return data_log
 
+
+# -------------------- Run Motor with AS-Curve --------------------
+def run_motor_ascurve(gpio, encoder, motor_id: int, direction: str,
+                      total_steps: int, v_max: float, total_time: float,
+                      t_acc: float, t_dec: float):
+    """
+    Asymmetric S-curve 모터 실행
+    """
+    STEPS_PER_REV = 200
+    MICROSTEP = 16
+    PITCH_MM = 5.0
+    ENC_CPR = 1000
+
+    gpio.set_dir(motor_id, direction == 'f')
+    gpio.set_enable(motor_id, True)
+
+    moved_steps = 0
+    com_pos = 0.0
+    prev_enc = encoder.read()
+    enc_init = (prev_enc / ENC_CPR) * PITCH_MM
+    data_log = []
+    start_time = time.time()
+
+    while moved_steps < total_steps:
+        t = time.time() - start_time
+        if t > total_time:
+            break
+
+        com_vel_steps = as_curve_velocity(t, v_max, t_acc, t_dec, total_time)
+        if com_vel_steps < 1e-6:
+            time.sleep(0.001)
+            continue
+
+        pulse_interval = 1.0 / com_vel_steps
+        gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval - 0.00002)
+        moved_steps += 1
+
+        com_pos = (moved_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
+
+        enc_now = encoder.read()
+        delta = enc_now - prev_enc
+        prev_enc = enc_now
+        enc_pos_mm = (enc_now / ENC_CPR) * PITCH_MM - enc_init
+        enc_vel_mm = ((delta / pulse_interval) / ENC_CPR) * PITCH_MM if delta != 0 else 0.0
+
+        t_ms = int(round(t * 1000))
+        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
+        data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
+
+    return data_log
