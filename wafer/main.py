@@ -1,3 +1,4 @@
+# main.py
 from encoder import (
     GPIOHelper, Encoder,
     MOTOR_STEP_PER_REV, MICROSTEP_SETTING, GEAR_RATIO,
@@ -32,7 +33,7 @@ def main():
             data_log = run_motor_scurve(
                 gpio, encoder, motor_id, direction, move_steps, v_max, shape
             )
-            filepath = save_csv(data_log, motor_id=motor_id, steps=move_steps, shape=shape, v_max=v_max)
+            save_csv(data_log, motor_id=motor_id, steps=move_steps, shape=shape, v_max=v_max)
             plot_results(data_log, title=f"S-Curve Motion ({shape})",
                          motor_id=motor_id, steps=move_steps, shape=shape)
 
@@ -46,11 +47,10 @@ def main():
             print(f"[INFO] AS-curve 실행 → steps={move_steps}, Vmax={v_max}, "
                   f"motor={motor_id}, dir={direction}, shape={shape}")
 
-            # roll_window, smooth_alpha는 기본값 사용
             data_log = run_motor_ascurve(
                 gpio, encoder, motor_id, direction, move_steps, v_max, shape
             )
-            filepath = save_csv(data_log, motor_id=motor_id, steps=move_steps, shape=shape, v_max=v_max)
+            save_csv(data_log, motor_id=motor_id, steps=move_steps, shape=shape, v_max=v_max)
             plot_results(data_log, title=f"AS-Curve Motion ({shape})",
                          motor_id=motor_id, steps=move_steps, shape=shape)
 
