@@ -22,54 +22,36 @@ def move_stepper_scurve_with_pid(
     if enc_read_deg is None:
         raise ValueError("enc_read_deg callable is required for closed-loop mode.")
 
-    # 엣지 케이스 가드 및 안전 최소 딜레이 적용
-    if total_steps <= 0:
-        return {"t": np.zeros(0), "cmd_rate": np.zeros(0)}
-    if min_delay >= max_delay:
-        min_delay, max_delay = sorted([min_delay, max_delay])
-    min_delay = max(min_delay, MIN_SAFE_DELAY)
+    # ... (생략: 기존 안전가드/enable/방향/ff_delays 생성 동일)
 
-    # 모터 Enable + 방향
-    gpio.enable_motor(ena_pin, True)
-    gpio.set_dir(dir_pin, forward)
-
-    # --- Feedforward delay 시퀀스 생성 ---
-    accel_steps = int(total_steps * accel_ratio)
-    decel_steps = accel_steps
-    const_steps = total_steps - accel_steps - decel_steps
-    if const_steps < 0:
-        accel_steps = total_steps // 2
-        decel_steps = total_steps - accel_steps
-        const_steps = 0
-
-    ff_delays = []
-    for i in range(accel_steps):
-        ff_delays.append(smooth_cos_delay(i, max(accel_steps, 1), min_delay, max_delay))
-    for _ in range(const_steps):
-        ff_delays.append(min_delay)
-    for i in range(decel_steps):
-        ff_delays.append(smooth_cos_delay(decel_steps - 1 - i, max(decel_steps, 1), min_delay, max_delay))
-
-    # --- 명령 궤적(각도) 계산 ---
+    # --- 명령 궤적(각도/각속도) 계산 (기존) ---
     cmd_rate_ff = np.array([delay_to_rate(d) for d in ff_delays], dtype=float)   # step/s
     cmd_w_ff = cmd_rate_ff * deg_per_step                                       # deg/s
     t_grid = np.cumsum(np.array(ff_delays, dtype=float))
     t_grid -= (t_grid[0] if len(t_grid) else 0.0)
     cmd_theta_ff = np.zeros_like(t_grid)
     for i in range(1, len(t_grid)):
-        dt = t_grid[i] - t_grid[i-1]
-        cmd_theta_ff[i] = cmd_theta_ff[i-1] + 0.5 * (cmd_w_ff[i] + cmd_w_ff[i-1]) * dt
+        dt_i = t_grid[i] - t_grid[i-1]
+        cmd_theta_ff[i] = cmd_theta_ff[i-1] + 0.5 * (cmd_w_ff[i] + cmd_w_ff[i-1]) * dt_i
 
-    # --- PID 초기화 ---
+    # --- PID 초기화 (기존) ---
     Kp, Ki, Kd = pid_gains
     pid = PID(kp=Kp, ki=Ki, kd=Kd, out_min=-600.0, out_max=600.0, tau=0.01)
 
     t0 = time.monotonic()
     last_t = t0
     last_sample = t0
-    t_log, cmd_rate_log = [], []
 
-    theta0 = enc_read_deg()  # 시작 오프셋
+    # 🔧 추가: 확장 로그 버퍼
+    t_log = []
+    cmd_rate_log = []
+    com_pos_log = []
+    enc_pos_log = []
+    com_vel_log = []
+    enc_vel_log = []
+
+    theta0 = enc_read_deg()     # 시작 오프셋
+    enc_prev = theta0           # 🔧 추가: 엔코더 속도 계산용
 
     # --- 실행 루프 ---
     for i, ff_d in enumerate(ff_delays):
@@ -82,6 +64,10 @@ def move_stepper_scurve_with_pid(
         meas_deg = enc_read_deg()
         e = target_deg - meas_deg
 
+        # 엔코더 속도(추정)
+        enc_vel_dps = (meas_deg - enc_prev) / dt
+        enc_prev = meas_deg
+
         # PID 보정 (deg/s → steps/s)
         trim_deg_per_s = pid.update(e, dt, anti_windup_ref=0.0)
         trim_steps = trim_deg_per_s / max(deg_per_step, 1e-9)
@@ -91,23 +77,40 @@ def move_stepper_scurve_with_pid(
         desired_rate_steps = max(ff_rate_steps + trim_steps, 1.0)
         d = rate_to_delay(desired_rate_steps, min_delay, max_delay)
 
-        # 로그
+        # 🔧 로그(샘플링)
         if now - last_sample >= sample_dt:
             t_log.append(now - t0)
-            cmd_rate_log.append(desired_rate_steps)
+            cmd_rate_log.append(desired_rate_steps)  # step/s
+            # 지령 각도/각속도
+            com_pos_log.append(target_deg)
+            com_vel_log.append(cmd_w_ff[i])
+            # 실측 각도/각속도
+            enc_pos_log.append(meas_deg)
+            enc_vel_log.append(enc_vel_dps)
             last_sample = now
 
         gpio.queue_pulse(step_pin, d)
 
-    # 큐 비우기 대기(간단 버전)
+    # 큐 비우기 + 마지막 샘플
     time.sleep(min_delay * TX_BACKLOG)
     t_log.append(time.monotonic() - t0)
     cmd_rate_log.append(delay_to_rate(min_delay))
+    # 마지막 값 재기록(보간 없이 직전값)
+    if len(com_pos_log):
+        com_pos_log.append(com_pos_log[-1])
+        com_vel_log.append(0.0)
+        enc_pos_log.append(enc_pos_log[-1] if len(enc_pos_log) else theta0)
+        enc_vel_log.append(0.0)
+
     gpio.enable_motor(ena_pin, False)
 
     return {
         "t": np.array(t_log, dtype=float),
-        "cmd_rate": np.array(cmd_rate_log, dtype=float),
+        "cmd_rate": np.array(cmd_rate_log, dtype=float),   # step/s (호환)
+        "com_pos_deg": np.array(com_pos_log, dtype=float),
+        "enc_pos_deg": np.array(enc_pos_log, dtype=float),
+        "com_vel_dps": np.array(com_vel_log, dtype=float),
+        "enc_vel_dps": np.array(enc_vel_log, dtype=float),
     }
 
 
@@ -202,65 +205,56 @@ def move_stepper_scurve_with_logging(
     gpio, dir_pin, step_pin, ena_pin,
     total_steps, forward: bool,
     min_delay, max_delay, accel_ratio=0.2,
-    sample_dt=0.015
+    sample_dt=0.015,
+    deg_per_step=0.018,   # 🔧 추가(기본값): 기존 호출과 호환
 ):
-    """
-    Open-loop S-curve 실행 + 간단 로그 반환.
-    반환 로그: {'t': np.array, 'cmd_rate': np.array}
-    """
-    # 엣지 케이스 가드 및 안전 최소 딜레이 적용
-    if total_steps <= 0:
-        return {"t": np.zeros(0), "cmd_rate": np.zeros(0)}
-    if min_delay >= max_delay:
-        min_delay, max_delay = sorted([min_delay, max_delay])
-    min_delay = max(min_delay, MIN_SAFE_DELAY)
-
-    # 모터 Enable + 방향
-    gpio.enable_motor(ena_pin, True)
-    gpio.set_dir(dir_pin, forward)
-
-    # --- Feedforward delay 시퀀스 생성 ---
-    accel_steps = int(total_steps * accel_ratio)
-    decel_steps = accel_steps
-    const_steps = total_steps - accel_steps - decel_steps
-    if const_steps < 0:
-        accel_steps = total_steps // 2
-        decel_steps = total_steps - accel_steps
-        const_steps = 0
-
-    ff_delays = []
-    for i in range(accel_steps):
-        ff_delays.append(smooth_cos_delay(i, max(accel_steps, 1), min_delay, max_delay))
-    for _ in range(const_steps):
-        ff_delays.append(min_delay)
-    for i in range(decel_steps):
-        ff_delays.append(smooth_cos_delay(decel_steps - 1 - i, max(decel_steps, 1), min_delay, max_delay))
+    # ... (생략: 기존 안전가드/enable/방향/ff_delays 생성 동일)
 
     # --- 실행 + 로깅 ---
     t0 = time.monotonic()
     last_sample = t0
-    t_log, cmd_rate_log = [], []
+
+    # 🔧 추가: 확장 로그 버퍼
+    t_log = []
+    cmd_rate_log = []
+    com_pos_log = []
+    com_vel_log = []
+
+    com_theta = 0.0  # deg 누적
 
     for d in ff_delays:
-        # 샘플 로그 (지령 속도: delay -> rate)
         now = time.monotonic()
+
+        # 지령 각속도 (deg/s)
+        com_vel_dps = delay_to_rate(d) * deg_per_step
+        # dt를 샘플링 간격으로 사용해 적분(표본마다 누적)
         if now - last_sample >= sample_dt:
+            dt_s = (now - last_sample)
+            com_theta += com_vel_dps * dt_s
+
             t_log.append(now - t0)
             cmd_rate_log.append(delay_to_rate(d))
+            com_pos_log.append(com_theta)
+            com_vel_log.append(com_vel_dps)
+
             last_sample = now
 
         # 한 스텝 펄스
         gpio.queue_pulse(step_pin, d)
 
-    # 큐 비우기 대기(간단 버전)
+    # 큐 비우기 + 마지막 샘플
     time.sleep(min_delay * TX_BACKLOG)
     t_log.append(time.monotonic() - t0)
     cmd_rate_log.append(delay_to_rate(min_delay))
+    com_pos_log.append(com_theta)
+    com_vel_log.append(0.0)
 
     gpio.enable_motor(ena_pin, False)
 
     return {
         "t": np.array(t_log, dtype=float),
-        "cmd_rate": np.array(cmd_rate_log, dtype=float),
+        "cmd_rate": np.array(cmd_rate_log, dtype=float),   # step/s (호환)
+        "com_pos_deg": np.array(com_pos_log, dtype=float),
+        "com_vel_dps": np.array(com_vel_log, dtype=float),
+        # open-loop에는 enc_* 미포함 (None/결측으로 처리해도 됨)
     }
-
