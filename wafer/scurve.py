@@ -26,61 +26,60 @@ def s_curve_velocity(t, v_max, total_time):
         return 0.0
     return v_max * (np.sin(np.pi * t / total_time))**2
 
-
 def run_motor_scurve(gpio, encoder, direction, total_steps, v_max, total_time, csv_filename="scurve_run.csv"):
-    """
-    gpio: GPIOHelper 인스턴스
-    encoder: Encoder 인스턴스
-    """
     STEPS_PER_REV = 200
     MICROSTEP = 16
     PITCH_MM = 5.0
     ENC_CPR = 1000
 
     # 방향 설정
-    gpio.write(20, 1 if direction == 'f' else 0)  # DIR_PIN = 20
-    gpio.write(16, 0)  # ENA_PIN = 16 (Enable)
+    gpio.write(20, 1 if direction == 'f' else 0)  # DIR_PIN
+    gpio.write(16, 0)  # ENA_PIN (Enable)
 
-    dt = 0.01
-    t = 0.0
     moved_steps = 0
-    step_accumulator = 0.0
-    com_pos = 0.0
+    data_log = []
+
+    start_time = time.time()
 
     prev_enc = encoder.read()
     enc_init = (prev_enc / ENC_CPR) * PITCH_MM
-    data_log = []
-    sample_count = 0
 
-    while t <= total_time and moved_steps < total_steps:
-        # --- 명령 속도 계산 ---
+    while moved_steps < total_steps:
+        # 현재 경과 시간
+        t = time.time() - start_time
+        if t > total_time:
+            break
+
+        # 현재 목표 속도 (steps/s)
         com_vel_steps = s_curve_velocity(t, v_max, total_time)
-        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
-        com_pos += com_vel_mm * dt
+        if com_vel_steps < 1:   # 속도가 1 step/s 이하이면 skip
+            continue
 
-        # --- 스텝 펄스 발생 ---
-        step_accumulator += com_vel_steps * dt
-        while step_accumulator >= 1.0 and moved_steps < total_steps:
-            gpio.pulse(21, high_time_s=0.0005, low_time_s=0.0005)  # STEP_PIN = 21
-            moved_steps += 1
-            step_accumulator -= 1.0
+        # 현재 스텝 주기 (s)
+        step_delay = 1.0 / com_vel_steps
 
-        # --- 엔코더 읽기 ---
+        # --- 펄스 발생 ---
+        gpio.pulse(21, high_time_s=0.0003, low_time_s=0.0003)  # STEP_PIN
+        moved_steps += 1
+
+        # --- 엔코더 ---
         enc_now = encoder.read()
         delta = enc_now - prev_enc
         prev_enc = enc_now
+
         enc_pos_mm = (enc_now / ENC_CPR) * PITCH_MM - enc_init
-        enc_vel_mm = ((delta / dt) / ENC_CPR) * PITCH_MM if sample_count > 2 else 0.0
+        enc_vel_mm = ((delta / step_delay) / ENC_CPR) * PITCH_MM if step_delay > 0 else 0.0
 
-        # --- 로그 저장 ---
+        com_pos_mm = (moved_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
+        com_vel_mm = (com_vel_steps / (STEPS_PER_REV * MICROSTEP)) * PITCH_MM
+
         t_ms = int(round(t * 1000))
-        data_log.append([t_ms, com_pos, enc_pos_mm, com_vel_mm, enc_vel_mm])
+        data_log.append([t_ms, com_pos_mm, enc_pos_mm, com_vel_mm, enc_vel_mm])
 
-        sample_count += 1
-        t += dt
-        time.sleep(dt)
+        # --- 스텝 주기만큼 sleep ---
+        time.sleep(step_delay)
 
-    # === CSV 저장 ===
+    # CSV 저장 & 그래프 출력
     os.makedirs("logs", exist_ok=True)
     filepath = os.path.join("logs", csv_filename)
     with open(filepath, "w", newline="") as f:
@@ -90,5 +89,6 @@ def run_motor_scurve(gpio, encoder, direction, total_steps, v_max, total_time, c
 
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
 
-    # === 그래프 출력 ===
+    from graph import plot_scurve_logs
     plot_scurve_logs(data_log)
+
