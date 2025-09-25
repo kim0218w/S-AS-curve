@@ -4,9 +4,10 @@ from graph import plot_scurve_profile
 import math
 import time
 from encoder import PID
-# ❌ 삭제: from scurve import smooth_cos_delay, delay_to_rate, rate_to_delay, MIN_SAFE_DELAY
+
 
 #-----------------scurve--------------------
+MIN_SAFE_DELAY = 0.00025  # 250us
 TX_BACKLOG = 8  # (옵션) 큐가 모두 나갈 때까지 대기할 때 사용할 여유 팩터
 
 def move_stepper_scurve_with_pid(
@@ -262,3 +263,4 @@ def move_stepper_scurve_with_logging(
         "t": np.array(t_log, dtype=float),
         "cmd_rate": np.array(cmd_rate_log, dtype=float),
     }
+
