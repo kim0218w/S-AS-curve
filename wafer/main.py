@@ -1,9 +1,19 @@
-from encoder import GPIOHelper, Encoder
+from encoder import (
+    GPIOHelper, Encoder,MOTOR_STEP_PER_REV, MICROSTEP_SETTING, GEAR_RATIO,
+    STEPS_PER_REV, DEG_PER_STEP)
 from scurve import run_motor_scurve, run_motor_ascurve, calc_scurve_params
 from graph import save_csv, plot_results
 
 
 def main():
+
+    print("[MOTOR CFG] motor_step/rev =", MOTOR_STEP_PER_REV)
+    print("[MOTOR CFG] microstep     =", MICROSTEP_SETTING)
+    print("[MOTOR CFG] gear_ratio    =", GEAR_RATIO)
+    print("[MOTOR CFG] STEPS_PER_REV =", STEPS_PER_REV)
+    print(f"[MOTOR CFG] DEG_PER_STEP  = {DEG_PER_STEP:.6f} deg/step")
+    print(f"[MOTOR CFG] 10000 steps   ≈ {10000 * DEG_PER_STEP:.2f} deg")
+
     gpio = GPIOHelper()
     encoder = Encoder(gpio)
 
@@ -33,8 +43,7 @@ def main():
                         motor_id=motor_id,
                         steps=move_steps,
                         shape=shape,
-                        roll_window=20,
-                        smooth_alpha=0.2)
+                        )
         elif mode == "2":  # AS-curve 실행
             motor_id = int(input("모터 선택 (17 또는 23): ").strip())
             v_max = float(input("Vmax 입력 [steps/s]: ").strip())
