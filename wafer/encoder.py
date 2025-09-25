@@ -73,18 +73,32 @@ class GPIOHelper:
 
 # -------------------- Encoder --------------------
 class Encoder:
-    def __init__(self, gpio: GPIOHelper):
-        self.gpio = gpio
+    """
+    Quadrature Encoder 카운트 읽기 클래스
+    - read(): 현재 카운트 반환
+    - reset(): 카운트 0으로 리셋
+    - stop(): polling 스레드 종료
+    """
+    def __init__(self, gpio=None):
         self.position = 0
         self._stop = False
         self._thread = None
-        if lgpio and gpio.h:
-            lgpio.gpio_claim_input(gpio.h, ENCODER_A_PIN)
-            lgpio.gpio_claim_input(gpio.h, ENCODER_B_PIN)
-            self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-            self._thread.start()
+        self.sim = True
+        self.gpio = gpio
+
+        try:
+            if lgpio and gpio and gpio.h:
+                lgpio.gpio_claim_input(gpio.h, ENCODER_A_PIN)
+                lgpio.gpio_claim_input(gpio.h, ENCODER_B_PIN)
+                self.sim = False
+                self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+                self._thread.start()
+        except Exception:
+            self.sim = True
 
     def _read_ab(self):
+        if self.sim:
+            return 0, 0
         a = lgpio.gpio_read(self.gpio.h, ENCODER_A_PIN)
         b = lgpio.gpio_read(self.gpio.h, ENCODER_B_PIN)
         return a, b
@@ -92,8 +106,10 @@ class Encoder:
     def _poll_loop(self):
         prev_a, prev_b = self._read_ab()
         prev = (prev_a << 1) | prev_b
-        trans = {0b0001:+1, 0b0011:+1, 0b0110:+1, 0b0100:+1,
-                 0b0010:-1, 0b0111:-1, 0b1111:-1, 0b1100:-1}
+        trans = {
+            0b0001: +1, 0b0011: +1, 0b0110: +1, 0b0100: +1,
+            0b0010: -1, 0b0111: -1, 0b1111: -1, 0b1100: -1,
+        }
         while not self._stop:
             a, b = self._read_ab()
             curr = (a << 1) | b
@@ -103,36 +119,52 @@ class Encoder:
                 delta = -delta
             self.position += delta
             prev = curr
-            time.sleep(0.001)
+            time.sleep(0.001)  # 1 kHz polling
 
-    def reset(self): self.position = 0
-    def read(self) -> int: return int(self.position)
+    def reset(self):
+        self.position = 0
+
+    def read(self) -> int:
+        return int(self.position)
+
     def stop(self):
         self._stop = True
-        if self._thread: self._thread.join(timeout=0.5)
-
+        if self._thread:
+            self._thread.join(timeout=0.5)
 
 # -------------------- Velocity Estimator --------------------
 from collections import deque
 
 
 class EncoderVelEstimator:
+    """
+    엔코더 카운트 차이(delta)와 dt를 받아 속도(mm/s) 추정
+    - Moving Average + 1차 Low-pass Filter 포함
+    """
     def __init__(self, cpr, pitch_mm, win_size=10, lpf_alpha=0.2):
         self.cpr = cpr
         self.pitch_mm = pitch_mm
-        self.win_size = win_size
-        self.lpf_alpha = lpf_alpha
         self.buffer = deque(maxlen=win_size)
+        self.lpf_alpha = lpf_alpha
         self.lpf_val = 0.0
         self.initialized = False
 
     def update(self, delta_count, dt):
+        # 순간 속도 (mm/s)
         vel_raw = ((delta_count / self.cpr) * self.pitch_mm) / dt
+
+        # 이동 평균
         self.buffer.append(vel_raw)
         vel_ma = sum(self.buffer) / len(self.buffer)
+
+        # 1차 Low-pass filter
         if not self.initialized:
             self.lpf_val = vel_ma
             self.initialized = True
         else:
-            self.lpf_val = self.lpf_alpha * vel_ma + (1 - self.lpf_alpha) * self.lpf_val
+            self.lpf_val = (
+                self.lpf_alpha * vel_ma +
+                (1 - self.lpf_alpha) * self.lpf_val
+            )
+
         return self.lpf_val
