@@ -77,16 +77,25 @@ def plot_results(
     else:
         df["enc_RPM"] = np.nan
 
-    # --- Plot ---
-    plt.figure(figsize=(8, 6))
+    # 이동 평균으로 스무딩
+    df["enc_RPM_smooth"] = df["enc_RPM"].rolling(window=20, center=True).mean()
 
-    # 속도 비교
-    plt.subplot(2, 1, 1)
+    # Commanded와 스케일 맞추기 (추세 비교용)
+    enc_max = df["enc_RPM_smooth"].max()
+    com_max = df["com_RPM"].max()
+    if enc_max and np.isfinite(enc_max) and enc_max > 0:
+        df["enc_RPM_scaled"] = df["enc_RPM_smooth"] * (com_max / enc_max)
+    else:
+        df["enc_RPM_scaled"] = df["enc_RPM_smooth"]
+
+    # --- Plot ---
+    plt.subplot(2,1,1)
     plt.plot(df["Time_ms"], df["com_RPM"], label="Commanded (RPM)", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_RPM"], label="Encoder (RPM, from loop)", alpha=0.8)
+    plt.plot(df["Time_ms"], df["enc_RPM"], label="Encoder RPM (raw)", alpha=0.4)
+    plt.plot(df["Time_ms"], df["enc_RPM_smooth"], label="Encoder RPM (smoothed)", alpha=0.8)
+    plt.plot(df["Time_ms"], df["enc_RPM_scaled"], label="Encoder RPM (scaled)", alpha=0.8)
     plt.ylabel("Speed [RPM]")
-    plt.legend()
-    plt.grid(True)
+    plt.legend(); plt.grid(True)
 
     # 위치 비교
     plt.subplot(2, 1, 2)
