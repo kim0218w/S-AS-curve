@@ -1,5 +1,3 @@
-
-
 from encoder import GPIOHelper, Encoder
 from scurve import run_motor_scurve, calc_scurve_params
 from graph import save_csv, plot_results
