@@ -9,30 +9,24 @@ except ImportError:
 
 # -------------------- Pin Assignments --------------------
 
-STEP_PIN_NAME17 = 23
-ENA_PIN_NAME17 = 25
-DIR_PIN_NAME17 = 24
+STEP_PIN_17 = 23
+ENA_PIN_17 = 25
+DIR_PIN_17 = 24
 
-
-DIR_PIN_NAME23 = 20
-STEP_PIN_NAME23 = 21
-ENA_PIN_NAME23 = 16
+DIR_PIN_23 = 20
+STEP_PIN_23 = 21
+ENA_PIN_23 = 16
 
 ENCODER_A_PIN = 3
 ENCODER_B_PIN = 2
-ENCODER_INVERT = True # 엔코더 방향 설정 (True: 정방향, False: 역방향)
+ENCODER_INVERT = True  # 엔코더 방향 설정 (True: 정방향, False: 역방향)
 
 IN1_PIN = 5
 IN2_PIN = 6
 PWM_PIN = 13
 
-# -------------------- GPIO Helper --------------------
-import time
-try:
-    import lgpio
-except ImportError:
-    lgpio = None
 
+# -------------------- GPIO Helper --------------------
 class GPIOHelper:
     def __init__(self):
         self.sim = (lgpio is None)
@@ -41,8 +35,8 @@ class GPIOHelper:
             try:
                 self.h = lgpio.gpiochip_open(0)
                 # 두 모터 핀 전부 출력으로 등록
-                for pin in [DIR_PIN_NAME17, STEP_PIN_NAME17, ENA_PIN_NAME17,
-                            DIR_PIN_NAME23, STEP_PIN_NAME23, ENA_PIN_NAME23]:
+                for pin in [DIR_PIN_17, STEP_PIN_17, ENA_PIN_17,
+                            DIR_PIN_23, STEP_PIN_23, ENA_PIN_23]:
                     lgpio.gpio_claim_output(self.h, pin)
                 # 초기값 (모터 Disable 상태)
                 for pin in [ENA_PIN_17, ENA_PIN_23]:
@@ -86,6 +80,8 @@ class GPIOHelper:
                 lgpio.gpiochip_close(self.h)
             except Exception:
                 pass
+
+
 # -------------------- Encoder --------------------
 class Encoder:
     def __init__(self, gpio: GPIOHelper):
