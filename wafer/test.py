@@ -1,5 +1,5 @@
 from scurve import run_motor_scurve, calc_scurve_params
-from encoder import encoder, gpio
+from encoder import Encoder, GPIOHelper
 
 if __name__ == "__main__":
     try:
@@ -21,7 +21,7 @@ if __name__ == "__main__":
         else:
             print("잘못된 모드 선택")
     finally:
-        try: encoder.stop()
+        try: Encoder.stop()
         except: pass
-        try: gpio.cleanup()
+        try: GPIOHelper.cleanup()
         except: pass
