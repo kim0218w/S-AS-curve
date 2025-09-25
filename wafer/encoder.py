@@ -30,7 +30,7 @@ class GPIOHelper:
             except Exception:
                 self.sim = True
                 self.h = None
-                print("[GPIO] ⚠️ GPIO 초기화 실패, 시뮬레이션 모드로 실행됩니다.")
+                print("[GPIO] GPIO 초기화 실패, 시뮬레이션 모드로 실행됩니다.")
 
     def write(self, pin, val):
         if not self.sim:
@@ -59,7 +59,7 @@ class Encoder:
         self.position = 0
         self.sim = True
         self._stop = False
-        self._thread = None
+        self._thread = None        
         try:
             if lgpio is not None:
                 self.sim = False
@@ -71,8 +71,8 @@ class Encoder:
     def _read_ab(self):
         if self.sim:
             return 0, 0
-        a = lgpio.gpio_read(gpio.h, ENCODER_A_PIN)
-        b = lgpio.gpio_read(gpio.h, ENCODER_B_PIN)
+        a = lgpio.gpio_read(self.gpio.h, ENCODER_A_PIN)
+        b = lgpio.gpio_read(self.gpio.h, ENCODER_B_PIN)
         return a, b
 
     def _poll_loop(self):
