@@ -18,35 +18,53 @@ def plot_scurve_profile(total_time, v_max):
     plt.tight_layout()
     plt.show()
 
+def plot_run_results(data):
+    # dict → DataFrame
+    df = pd.DataFrame(data) if not isinstance(data, pd.DataFrame) else data
 
-def plot_run_results(data_log):
-    """실제 모터 실행 후 로그 데이터(DataFrame 또는 리스트)로 속도/위치 그래프 그리기"""
-    if not isinstance(data_log, pd.DataFrame):
-        df = pd.DataFrame(data_log, columns=[
-            "Time_ms", "com_Pos_mm", "enc_Pos_mm",
-            "com_Vel_mm_per_s", "enc_Vel_mm_per_s"
-        ])
-    else:
-        df = data_log
+    has_com_v = "com_vel_dps" in df
+    has_enc_v = "enc_vel_dps" in df
+    has_com_p = "com_pos_deg" in df
+    has_enc_p = "enc_pos_deg" in df
 
-    plt.figure(figsize=(8, 4))
+    if "t" not in df:
+        print("[plot_run_results] 't' 컬럼이 없습니다.")
+        return
 
-    # 속도 그래프
-    plt.subplot(2, 1, 1)
-    plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"], label="com_Vel_mm_per_s", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"], label="enc_Vel_mm_per_s", alpha=0.8)
-    plt.ylabel("Velocity [mm/s]")
-    plt.legend()
-    plt.grid()
+    nrows = 0
+    if has_com_v or has_enc_v: nrows += 1
+    if has_com_p or has_enc_p: nrows += 1
+    if nrows == 0:
+        # 최소: cmd_rate(step/s)만 있을 때라도 그려주기
+        if "cmd_rate" in df:
+            plt.figure(figsize=(8,3))
+            plt.plot(df["t"], df["cmd_rate"], label="cmd_rate [step/s]")
+            plt.xlabel("Time [s]"); plt.ylabel("cmd_rate [step/s]")
+            plt.grid(); plt.legend(); plt.tight_layout(); plt.show()
+        else:
+            print("[plot_run_results] 표시할 데이터가 없습니다.")
+        return
 
-    # 위치 그래프
-    plt.subplot(2, 1, 2)
-    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="com_Pos_mm")
-    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="enc_Pos_mm", alpha=0.8)
-    plt.xlabel("Time [ms]")
-    plt.ylabel("Position [mm]")
-    plt.legend()
-    plt.grid()
+    plt.figure(figsize=(9, 3*nrows))
+    row = 1
+
+    # 속도
+    if has_com_v or has_enc_v:
+        plt.subplot(nrows,1,row); row += 1
+        if has_com_v:
+            plt.plot(df["t"], df["com_vel_dps"], label="com_vel [deg/s]", linestyle="--")
+        if has_enc_v:
+            plt.plot(df["t"], df["enc_vel_dps"], label="enc_vel [deg/s]", alpha=0.8)
+        plt.ylabel("Velocity [deg/s]"); plt.grid(); plt.legend()
+
+    # 위치
+    if has_com_p or has_enc_p:
+        plt.subplot(nrows,1,row); row += 1
+        if has_com_p:
+            plt.plot(df["t"], df["com_pos_deg"], label="com_pos [deg]")
+        if has_enc_p:
+            plt.plot(df["t"], df["enc_pos_deg"], label="enc_pos [deg]", alpha=0.8)
+        plt.xlabel("Time [s]"); plt.ylabel("Position [deg]"); plt.grid(); plt.legend()
 
     plt.tight_layout()
     plt.show()
