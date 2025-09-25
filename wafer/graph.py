@@ -28,9 +28,9 @@ def plot_run_results(data):
     # 속도
     ax1 = plt.subplot(rows, 1, 1)
     if "com_vel_dps" in df.columns:
-        ax1.plot(df["t"], df["com_vel_dps"], label="Commanded ω [deg/s]", linestyle="--")
+        ax1.plot(df["t"], df["com_vel_dps"], label="com_vel [deg/s]", linestyle="--")
     if "enc_vel_dps" in df.columns:
-        ax1.plot(df["t"], df["enc_vel_dps"], label="Measured ω [deg/s]")
+        ax1.plot(df["t"], df["enc_vel_dps"], label="enc_vel [deg/s]")
     elif "cmd_rate" in df.columns:
         ax1.plot(df["t"], df["cmd_rate"], label="cmd_rate [step/s]")
     ax1.set_ylabel("Velocity"); ax1.grid(); ax1.legend()
@@ -39,9 +39,9 @@ def plot_run_results(data):
     if have_enc or ("com_pos_deg" in df.columns):
         ax2 = plt.subplot(rows, 1, rows)
         if "com_pos_deg" in df.columns:
-            ax2.plot(df["t"], df["com_pos_deg"], label="Commanded θ [deg]")
+            ax2.plot(df["t"], df["com_pos_deg"], label="com_pos [deg]")
         if "enc_pos_deg" in df.columns:
-            ax2.plot(df["t"], df["enc_pos_deg"], label="Measured θ [deg]")
+            ax2.plot(df["t"], df["enc_pos_deg"], label="enc_pos [deg]")
         ax2.set_xlabel("Time [s]"); ax2.set_ylabel("Angle [deg]"); ax2.grid(); ax2.legend()
 
     plt.tight_layout(); plt.show()
@@ -82,22 +82,22 @@ def plot_overlay(t, cmd_angle=None, enc_angle=None, cmd_vel=None, enc_vel=None, 
 
     if (cmd_angle is not None or enc_angle is not None):
         plt.subplot(nrows, 1, row); row += 1
-        if cmd_angle is not None: plt.plot(t, cmd_angle, label="Commanded θ", linestyle="--")
-        if enc_angle is not None: plt.plot(t, enc_angle, label="Measured θ")
+        if cmd_angle is not None: plt.plot(t, cmd_angle, label="com_pos [deg]", linestyle="--")
+        if enc_angle is not None: plt.plot(t, enc_angle, label="enc_pos [deg]")
         plt.ylabel("Angle [deg]"); plt.legend(); plt.grid()
         if title_prefix: plt.title(f"{title_prefix} Angle")
 
     if (cmd_vel is not None or enc_vel is not None):
         plt.subplot(nrows, 1, row); row += 1
-        if cmd_vel is not None: plt.plot(t, cmd_vel, label="Commanded ω", linestyle="--")
-        if enc_vel is not None: plt.plot(t, enc_vel, label="Measured ω")
+        if cmd_vel is not None: plt.plot(t, cmd_vel, label="com_vel [deg/s]", linestyle="--")
+        if enc_vel is not None: plt.plot(t, enc_vel, label="enc_vel [deg/s]")
         plt.ylabel("Velocity [deg/s]"); plt.legend(); plt.grid()
         if title_prefix: plt.title(f"{title_prefix} Velocity")
 
     if enc_acc is not None:
         plt.subplot(nrows, 1, row); row += 1
-        plt.plot(t, enc_acc, label="Measured α")
+        plt.plot(t, enc_acc, label="enc_acc [deg/s²]")
         plt.ylabel("Acceleration [deg/s²]"); plt.legend(); plt.grid()
         if title_prefix: plt.title(f"{title_prefix} Acceleration")
 
-    plt.xlabel("Time [s]"); plt.tight_layout(); plt.show()
+    plt.xlabel("Time [ms]"); plt.tight_layout(); plt.show()
