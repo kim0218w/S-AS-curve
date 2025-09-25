@@ -17,8 +17,8 @@ def main():
             direction = input("모터 방향 입력 (f: forward / b: backward): ").strip().lower()
             shape = input("S-curve 형태 선택 (short/mid/long, 기본=mid): ").strip().lower() or "mid"
 
-            print(f"[INFO] S-curve 실행 → steps={move_steps}, Vmax={v_max} [steps/s], "
-                  f"motor={motor_id}, dir={direction}, shape={shape}")
+            print(f"[INFO] 목표 스텝={move_steps}, v_max={v_max}, shape={shape} "
+                f"→ 이동시간 자동 계산")
 
             data_log = run_motor_scurve(
                 gpio, encoder, motor_id, direction, move_steps, v_max, shape=shape
@@ -29,12 +29,12 @@ def main():
                                 shape=shape,
                                 v_max=v_max)
             plot_results(data_log,
-                         title=f"S-Curve Motion ({shape})",
-                         motor_id=motor_id,
-                         steps=move_steps,
-                         shape=shape,
-                         smooth_alpha=0.1)
-
+                        title=f"S-Curve Motion ({shape})",
+                        motor_id=motor_id,
+                        steps=move_steps,
+                        shape=shape,
+                        roll_window=20,
+                        smooth_alpha=0.2)
         elif mode == "2":  # AS-curve 실행
             motor_id = int(input("모터 선택 (17 또는 23): ").strip())
             v_max = float(input("Vmax 입력 [steps/s]: ").strip())
@@ -42,8 +42,14 @@ def main():
             direction = input("모터 방향 입력 (f: forward / b: backward): ").strip().lower()
             shape = input("AS-curve 형태 선택 (short/mid/long, 기본=mid): ").strip().lower() or "mid"
 
-            print(f"[INFO] AS-curve 실행 → steps={move_steps}, Vmax={v_max} [steps/s], "
-                  f"motor={motor_id}, dir={direction}, shape={shape}")
+            roll_win = input("속도 계산 rolling window (기본=20): ").strip()
+            roll_win = int(roll_win) if roll_win else 20
+            alpha_in = input("EMA alpha (0~1, 기본=0.2): ").strip()
+            smooth_alpha = float(alpha_in) if alpha_in else 0.2
+
+            print(f"[INFO] AS-curve 실행 → steps={move_steps}, Vmax={v_max}, "
+                  f"motor={motor_id}, dir={direction}, shape={shape}, "
+                  f"roll_win={roll_win}, alpha={smooth_alpha}")
 
             data_log = run_motor_ascurve(
                 gpio, encoder, motor_id, direction, move_steps, v_max, shape=shape
@@ -58,7 +64,8 @@ def main():
                          motor_id=motor_id,
                          steps=move_steps,
                          shape=shape,
-                         smooth_alpha=0.1)
+                         roll_window=roll_win,
+                         smooth_alpha=smooth_alpha)
 
         elif mode == "3":  # 파라미터 계산
             steps_in = input("총 스텝 수 입력 (또는 Enter): ").strip()
