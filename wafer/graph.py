@@ -41,49 +41,32 @@ def save_csv(df_or_list, filename="scurve_run.csv", **meta):
 
 
 # -------------------- 실제 데이터 기반 플롯 --------------------
-def plot_results(
-    data_log,
-    title="S-Curve Motion (mm/s)",
-    filename="scurve_run.csv",
-    smooth_window=20,  # 이동 평균 창 크기 (샘플 개수 기준)
-    **meta
-):
+def plot_results(csv_path="logs/scurve_run.csv", title="S-curve Motion"):
     """
-    Commanded vs Encoder 속도를 mm/s 단위 그대로 비교.
-    - com_Vel_mm_per_s: 명령 속도(mm/s)
-    - enc_Vel_mm_per_s: run loop 기록값 (mm/s)
+    run_motor_scurve 에서 기록된 CSV를 불러와 Commanded vs Encoder 비교 그래프 출력.
+    - Time_ms : ms 단위 시간
+    - com_Vel_mm_per_s : 명령 속도 (mm/s)
+    - enc_Vel_mm_per_s : EncoderVelEstimator 기반 추정 속도 (mm/s)
+    - com_Pos_mm / enc_Pos_mm : 위치 비교
     """
-    # --- DataFrame 준비 ---
-    df = pd.DataFrame(data_log, columns=[
-        "Time_ms", "com_Pos_mm", "enc_Pos_mm", "com_Vel_mm_per_s", "enc_Vel_raw"
-    ])
-    df["Time_s"] = df["Time_ms"] / 1000.0
+    df = pd.read_csv(csv_path)
 
-    # --- 명령 속도 (mm/s) ---
-    df["com_Vel_mm_per_s"] = df["com_Vel_mm_per_s"]
-
-    # --- Encoder 속도 (mm/s, smoothed) ---
-    df["enc_Vel_mm_per_s"] = df["enc_Vel_raw"]
-    if smooth_window > 1:
-        df["enc_Vel_mm_per_s"] = (
-            df["enc_Vel_mm_per_s"].rolling(window=smooth_window, center=True).mean()
-        )
-
-    # --- Plot ---
     plt.figure(figsize=(8, 6))
 
-    # 속도 비교 (mm/s)
+    # --- 속도 비교 ---
     plt.subplot(2, 1, 1)
-    plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"], label="Commanded (mm/s)", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"], label="Encoder (mm/s, smoothed)", alpha=0.8)
-    plt.ylabel("Speed [mm/s]")
+    plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"],
+             label="Commanded (mm/s)", linestyle="--")
+    plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"],
+             label="Encoder (mm/s, filtered)", alpha=0.8)
+    plt.ylabel("Velocity [mm/s]")
     plt.legend()
     plt.grid(True)
 
-    # 위치 비교 (mm)
+    # --- 위치 비교 ---
     plt.subplot(2, 1, 2)
     plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position")
-    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position")
+    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position", alpha=0.8)
     plt.xlabel("Time [ms]")
     plt.ylabel("Position [mm]")
     plt.legend()
@@ -92,7 +75,3 @@ def plot_results(
     plt.suptitle(title)
     plt.tight_layout()
     plt.show()
-
-    # --- CSV 저장 ---
-    save_csv(df, filename=filename, **meta)
-    return df
