@@ -5,7 +5,17 @@ import csv
 import numpy as np
 import pandas as pd
 from graph import plot_run_results, unwrap_deg, finite_diff, cumtrapz, plot_overlay
-from scurve import calc_scurve_params, s_curve_velocity, split_motion_time, smooth_cos_delay, rate_to_delay, delay_to_rate, move_stepper_scurve_with_logging, move_stepper_scurve_with_pid
+from scurve import (
+    calc_scurve_params,
+    s_curve_velocity,
+    split_motion_time,
+    smooth_cos_delay,
+    rate_to_delay,
+    delay_to_rate,
+    move_stepper_scurve_with_logging,
+    move_stepper_scurve_with_pid
+)
+
 from encoder import Encoder, EncoderVelEstimator, PID, EncoderMux
 
 try:
@@ -71,6 +81,38 @@ class GPIOHelper:
         time.sleep(high_time_s)
         lgpio.gpio_write(self.h, pin, 0)
         time.sleep(low_time_s)
+
+    def enable_motor(self, ena_pin, enable=True):
+        """
+        A4988 기준: Enable LOW가 모터 활성화
+        """
+        if self.sim:
+            return
+        self._claim_output(ena_pin)
+        lgpio.gpio_write(self.h, ena_pin, 0 if enable else 1)
+
+    def set_dir(self, dir_pin, forward=True):
+        """
+        DIR 핀 방향 설정
+        """
+        if self.sim:
+            return
+        self._claim_output(dir_pin)
+        lgpio.gpio_write(self.h, dir_pin, 1 if forward else 0)
+
+    def queue_pulse(self, step_pin, half_period_s):
+        """
+        Sleep 기반 '한 스텝' 펄스
+        """
+        if self.sim:
+            # 시뮬레이션 모드에서는 단순 sleep
+            time.sleep(2 * half_period_s)
+            return
+        self._claim_output(step_pin)
+        lgpio.gpio_write(self.h, step_pin, 1)
+        time.sleep(half_period_s)
+        lgpio.gpio_write(self.h, step_pin, 0)
+        time.sleep(half_period_s)
 
     def cleanup(self):
         if not self.sim and self.h:
