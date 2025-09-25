@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from collections import deque
 
 
 # -------------------- CSV 저장 --------------------
@@ -45,19 +46,47 @@ def save_csv(df_or_list, filename="scurve_run.csv", **meta):
     return filepath
 
 
+# -------------------- run loop용 Encoder 속도 추정기 --------------------
+class EncoderVelEstimator:
+    def __init__(self, cpr, pitch_mm, win_size=10):
+        """
+        cpr: encoder counts per revolution
+        pitch_mm: 1회전당 이동(mm)
+        win_size: 속도 추정에 사용할 샘플 개수 (윈도우 크기)
+        """
+        self.cpr = cpr
+        self.pitch_mm = pitch_mm
+        self.win_size = win_size
+        self.buffer = deque(maxlen=win_size)
+
+    def update(self, delta, dt):
+        """
+        delta: 이번 샘플에서의 엔코더 카운트 차이
+        dt: 샘플링 시간(s)
+        """
+        self.buffer.append(delta)
+        if len(self.buffer) < 2:
+            return 0.0
+        # 윈도우 평균 기반 속도 추정 (mm/s)
+        delta_sum = sum(self.buffer)
+        vel_cps = delta_sum / (len(self.buffer) * dt)  # counts/sec
+        vel_mm_s = (vel_cps / self.cpr) * self.pitch_mm
+        return vel_mm_s
+
+
 # -------------------- 실제 데이터 기반 플롯 --------------------
 def plot_results(
     data_log,
     title="S-Curve Motion",
     filename="scurve_run.csv",
     pitch_mm=5.0,   # 1 rev 당 mm
+    smooth_window=20,  # 이동 평균 창 크기 (샘플 개수 기준)
     **meta
 ):
     """
-    Commanded vs Encoder 속도를 직접 비교.
+    Commanded vs Encoder 속도를 절대값(RPM)으로 비교.
     - enc_RPM은 run loop에서 기록한 enc_Vel_raw(mm/s)를 변환해서 사용
-    - 위치 기반 미분/필터링은 제거
-    - 그래프와 CSV에는 com_RPM, enc_RPM만 기록
+    - 이동 평균 필터로 가독성 개선
     """
     # --- DataFrame 준비 ---
     df = pd.DataFrame(data_log, columns=[
@@ -77,25 +106,20 @@ def plot_results(
     else:
         df["enc_RPM"] = np.nan
 
-    # 이동 평균으로 스무딩
-    df["enc_RPM_smooth"] = df["enc_RPM"].rolling(window=20, center=True).mean()
-
-    # Commanded와 스케일 맞추기 (추세 비교용)
-    enc_max = df["enc_RPM_smooth"].max()
-    com_max = df["com_RPM"].max()
-    if enc_max and np.isfinite(enc_max) and enc_max > 0:
-        df["enc_RPM_scaled"] = df["enc_RPM_smooth"] * (com_max / enc_max)
-    else:
-        df["enc_RPM_scaled"] = df["enc_RPM_smooth"]
+    # --- 이동 평균 (스무딩) ---
+    if smooth_window > 1:
+        df["enc_RPM"] = df["enc_RPM"].rolling(window=smooth_window, center=True).mean()
 
     # --- Plot ---
-    plt.subplot(2,1,1)
+    plt.figure(figsize=(8, 6))
+
+    # 속도 비교
+    plt.subplot(2, 1, 1)
     plt.plot(df["Time_ms"], df["com_RPM"], label="Commanded (RPM)", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_RPM"], label="Encoder RPM (raw)", alpha=0.4)
-    plt.plot(df["Time_ms"], df["enc_RPM_smooth"], label="Encoder RPM (smoothed)", alpha=0.8)
-    plt.plot(df["Time_ms"], df["enc_RPM_scaled"], label="Encoder RPM (scaled)", alpha=0.8)
+    plt.plot(df["Time_ms"], df["enc_RPM"], label="Encoder (RPM, smoothed)", alpha=0.8)
     plt.ylabel("Speed [RPM]")
-    plt.legend(); plt.grid(True)
+    plt.legend()
+    plt.grid(True)
 
     # 위치 비교
     plt.subplot(2, 1, 2)
@@ -110,6 +134,6 @@ def plot_results(
     plt.tight_layout()
     plt.show()
 
-    # --- CSV 저장 (첫 줄에 메타데이터 포함) ---
+    # --- CSV 저장 ---
     save_csv(df, filename=filename, **meta)
     return df
