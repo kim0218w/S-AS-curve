@@ -20,6 +20,33 @@ IN1_PIN = 5
 IN2_PIN = 6
 PWM_PIN = 13
 
+# ---- Motor parameters (centralized) ----
+# 모터/드라이버/기어 설정을 한 곳에서 관리합니다.
+MOTOR_STEP_PER_REV = 200    # 보통 1.8° 스텝모터는 200
+MICROSTEP_SETTING  = 16     # A4988/TMC 등 드라이버 DIP 스위치 값 (1,2,4,8,16,…)
+GEAR_RATIO         = 1.0    # 감속기 기어비 (예: 5:1이면 5.0, 없으면 1.0)
+
+# 파생 값 (자동 계산)
+STEPS_PER_REV = MOTOR_STEP_PER_REV * MICROSTEP_SETTING * GEAR_RATIO
+DEG_PER_STEP  = 360.0 / STEPS_PER_REV   # 한 스텝(펄스)당 각도[deg]
+
+def set_motion_params(*, motor_step_per_rev=None, microstep=None, gear_ratio=None):
+    """
+    런타임에 설정을 바꾸고 싶을 때 사용:
+    set_motion_params(microstep=8, gear_ratio=5.0)
+    """
+    global MOTOR_STEP_PER_REV, MICROSTEP_SETTING, GEAR_RATIO, STEPS_PER_REV, DEG_PER_STEP
+    if motor_step_per_rev is not None:
+        MOTOR_STEP_PER_REV = int(motor_step_per_rev)
+    if microstep is not None:
+        MICROSTEP_SETTING = int(microstep)
+    if gear_ratio is not None:
+        GEAR_RATIO = float(gear_ratio)
+
+    STEPS_PER_REV = MOTOR_STEP_PER_REV * MICROSTEP_SETTING * GEAR_RATIO
+    DEG_PER_STEP  = 360.0 / STEPS_PER_REV
+
+
 
 # -------------------- GPIO Helper --------------------
 class GPIOHelper:
