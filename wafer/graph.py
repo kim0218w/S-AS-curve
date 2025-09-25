@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 
 
 def save_csv(data_log, filename_base="scurve_run",
-             motor_id=None, steps=None, shape=None, v_max=None):
+             motor_id=None, steps=None, shape=None, v_max=None,
+             smooth_alpha=0.1):
     os.makedirs("logs", exist_ok=True)
 
     # 파일 이름에 motor_id, steps, shape 반영
@@ -21,6 +22,23 @@ def save_csv(data_log, filename_base="scurve_run",
     filename = f"{filename_base}{extra_str}.csv"
     filepath = os.path.join("logs", filename)
 
+    # DataFrame 변환
+    df = pd.DataFrame(data_log, columns=[
+        "Time_ms", "com_Angle_deg", "enc_Angle_deg",
+        "com_Vel_deg_per_s", "enc_Vel_raw"   # enc_Vel_raw = placeholder
+    ])
+    df["Time_s"] = df["Time_ms"] / 1000.0
+
+    # 위치 기반 속도로 교체
+    df["enc_Vel_deg_per_s"] = df["enc_Angle_deg"].diff() / df["Time_s"].diff()
+
+    # EMA smoothing 적용
+    if smooth_alpha and 0 < smooth_alpha < 1:
+        df["enc_Vel_deg_per_s"] = df["enc_Vel_deg_per_s"].ewm(alpha=smooth_alpha).mean()
+
+    # 불필요한 원래 열 제거
+    df = df.drop(columns=["enc_Vel_raw"])
+
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
 
@@ -33,11 +51,9 @@ def save_csv(data_log, filename_base="scurve_run",
         writer.writerow([])
 
         # -------- 데이터 헤더 및 로그 --------
-        writer.writerow([
-            "Time_ms", "com_Angle_deg", "enc_Angle_deg",
-            "com_Vel_deg_per_s", "enc_Vel_deg_per_s"
-        ])
-        writer.writerows(data_log)
+        writer.writerow(df.columns.tolist())
+        for _, row in df.iterrows():
+            writer.writerow(row.values.tolist())
 
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
     return filepath
@@ -51,18 +67,14 @@ def plot_results(data_log, save_png=True, title="Stepper Motor Motion",
 
     df = pd.DataFrame(data_log, columns=[
         "Time_ms", "com_Angle_deg", "enc_Angle_deg",
-        "com_Vel_deg_per_s", "enc_Vel_deg_per_s"
+        "com_Vel_deg_per_s", "enc_Vel_raw"
     ])
     df["Time_s"] = df["Time_ms"] / 1000.0
 
-    # -------------------- 위치 기반 속도 재계산 --------------------
-    df["enc_Vel_from_pos"] = df["enc_Angle_deg"].diff() / df["Time_s"].diff()
-
-    # EMA smoothing 적용
+    # 위치 기반 속도로 교체
+    df["enc_Vel_deg_per_s"] = df["enc_Angle_deg"].diff() / df["Time_s"].diff()
     if smooth_alpha and 0 < smooth_alpha < 1:
-        df["enc_Vel_from_pos_smooth"] = df["enc_Vel_from_pos"].ewm(alpha=smooth_alpha).mean()
-    else:
-        df["enc_Vel_from_pos_smooth"] = df["enc_Vel_from_pos"]
+        df["enc_Vel_deg_per_s"] = df["enc_Vel_deg_per_s"].ewm(alpha=smooth_alpha).mean()
 
     plt.figure(figsize=(12, 6))
     plt.suptitle(title, fontsize=14, fontweight="bold")
@@ -71,7 +83,7 @@ def plot_results(data_log, save_png=True, title="Stepper Motor Motion",
     plt.subplot(2, 1, 1)
     plt.plot(df["Time_s"], df["com_Vel_deg_per_s"],
              label="Commanded Angular Velocity", linestyle="--", linewidth=2)
-    plt.plot(df["Time_s"], df["enc_Vel_from_pos_smooth"],
+    plt.plot(df["Time_s"], df["enc_Vel_deg_per_s"],
              label=f"Encoder Angular Velocity (from position, EMA α={smooth_alpha})",
              alpha=0.9, linewidth=1.5)
     plt.ylabel("Angular Velocity [deg/s]")
