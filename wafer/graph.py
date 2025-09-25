@@ -94,9 +94,13 @@ def plot_results(
     else:
         vel_mm_s = np.gradient(pos, df["Time_s"])  # fallback
 
-    # ----- mm/s -> RPS (항상 양수로) -----
-    df["enc_RPS"] = np.abs(vel_mm_s / pitch_mm) if (pitch_mm and pitch_mm != 0) else np.nan
-    df["com_RPS"] = np.abs(df["com_Vel_mm_per_s"] / pitch_mm)
+    # ----- mm/s -> RPS (부호 유지) -----
+    if pitch_mm and pitch_mm != 0:
+        df["enc_RPS"] = vel_mm_s / pitch_mm
+        df["com_RPS"] = df["com_Vel_mm_per_s"] / pitch_mm
+    else:
+        df["enc_RPS"] = np.nan
+        df["com_RPS"] = np.nan
 
     # ----- 추가 계산 (RPM, 펄스 Hz) -----
     steps_per_rev = (360.0/step_angle_deg) * microstep
