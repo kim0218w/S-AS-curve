@@ -26,11 +26,21 @@ def s_curve_velocity(t, v_max, total_time):
         return 0.0
     return v_max * (np.sin(np.pi * t / total_time))**2
 
-def run_motor_scurve(gpio, encoder, direction, total_steps, v_max, total_time, csv_filename="scurve_run.csv"):
+
+def run_motor_scurve(gpio, encoder, direction, total_steps, v_max, total_time,
+                     csv_filename="scurve_run.csv"):
+    """
+    gpio     : GPIOHelper 객체
+    encoder  : Encoder(AS5600 I2C) 객체
+    direction: 'f' 또는 'b'
+    total_steps: 총 스텝 수
+    v_max    : 최대 속도 (step/s)
+    total_time: 총 이동 시간 (s)
+    """
     STEPS_PER_REV = 200
     MICROSTEP = 16
     PITCH_MM = 5.0
-    ENC_CPR = 1000
+    ENC_CPR = 4096   # AS5600 = 12bit = 4096 counts/rev
 
     # 방향 설정
     gpio.write(20, 1 if direction == 'f' else 0)  # DIR_PIN
@@ -84,11 +94,12 @@ def run_motor_scurve(gpio, encoder, direction, total_steps, v_max, total_time, c
     filepath = os.path.join("logs", csv_filename)
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Time_ms","com_Pos_mm","enc_Pos_mm","com_Vel_mm_per_s","enc_Vel_mm_per_s"])
+        writer.writerow([
+            "Time_ms", "com_Pos_mm", "enc_Pos_mm",
+            "com_Vel_mm_per_s", "enc_Vel_mm_per_s"
+        ])
         writer.writerows(data_log)
 
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
 
-    from graph import plot_scurve_logs
     plot_scurve_logs(data_log)
-
