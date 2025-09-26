@@ -62,10 +62,50 @@ def as_curve_velocity(t: float, v_max: float,
         tau = t - (t_acc + t_const)
         return v_max * np.sin((np.pi/2) * (1 - tau / t_dec))
     return 0.0
+def compute_total_time_ascurve(
+    total_steps: int,
+    v_max_steps: float,
+    shape: str = "mid",
+    r_acc: float = None,
+    r_const: float = None,
+    r_dec: float = None,
+):
+    """
+    AS-curve 총 시간 및 구간 계산
+    - shape = "short", "mid", "long" 중 선택 (기본값)
+    - 또는 r_acc, r_const, r_dec 직접 입력 (합은 자동 정규화)
+    """
+
+    # ---------------- shape 기반 기본값 ----------------
+    if r_acc is None or r_const is None or r_dec is None:
+        if shape == "short":
+            r_acc, r_dec, r_const = 0.4, 0.6, 0.0
+        elif shape == "long":
+            r_acc, r_dec, r_const = 0.15, 0.25, 0.6
+        else:  # mid
+            r_acc, r_dec, r_const = 0.2, 0.4, 0.4
+
+    # ---------------- 정규화 ----------------
+    total = r_acc + r_const + r_dec
+    if total <= 0:
+        raise ValueError("r_acc + r_const + r_dec > 0 이어야 합니다.")
+    r_acc /= total
+    r_const /= total
+    r_dec /= total
+
+    # ---------------- 시간 계산 ----------------
+    v_eff = vmax_effective(v_max_steps)
+    coeff = 0.5*(r_acc+r_dec) + r_const
+    if coeff <= 0:
+        raise ValueError("비율 설정이 잘못되어 총 시간이 계산되지 않습니다.")
+    T = total_steps / (v_eff * coeff)
+
+    return T, r_acc*T, r_const*T, r_dec*T
+
 
 # -------------------- 속도 프로파일 --------------------
 def s_curve_velocity_steps(t: float, v_max_steps: float,
-                           t_acc: float, t_const: float, t_dec: float,
+                           t_acc: float, t_const: float, t_dec: float
                            T_total: float) -> float:
     """S-curve (sin^2 프로파일)"""
     if T_total <= 0 or v_max_steps <= 0:
