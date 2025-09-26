@@ -1,5 +1,6 @@
 import time
 import threading
+from collections import deque
 
 try:
     import lgpio
@@ -8,12 +9,12 @@ except ImportError:
 
 # -------------------- Pin Assignments --------------------
 STEP_PIN_17 = 23
-ENA_PIN_17 = 25
-DIR_PIN_17 = 24
+ENA_PIN_17  = 25
+DIR_PIN_17  = 24
 
 STEP_PIN_23 = 21
-ENA_PIN_23 = 16
-DIR_PIN_23 = 20
+ENA_PIN_23  = 16
+DIR_PIN_23  = 20
 
 ENCODER_A_PIN = 3
 ENCODER_B_PIN = 2
@@ -22,6 +23,7 @@ ENCODER_INVERT = True
 IN1_PIN = 5
 IN2_PIN = 6
 PWM_PIN = 13
+
 # -------------------- Motor Parameters --------------------
 MOTOR_STEP_PER_REV = 200    # 보통 200 (1.8°/step 모터)
 MICROSTEP_SETTING  = 16     # A4988, TMC 등 드라이버 DIP 스위치 값
@@ -29,6 +31,7 @@ GEAR_RATIO         = 1.0    # 감속기 기어비 (없으면 1.0)
 
 STEPS_PER_REV = MOTOR_STEP_PER_REV * MICROSTEP_SETTING * GEAR_RATIO
 DEG_PER_STEP  = 360.0 / STEPS_PER_REV
+
 
 def set_motion_params(*, motor_step_per_rev=None, microstep=None, gear_ratio=None):
     global MOTOR_STEP_PER_REV, MICROSTEP_SETTING, GEAR_RATIO, STEPS_PER_REV, DEG_PER_STEP
@@ -41,8 +44,32 @@ def set_motion_params(*, motor_step_per_rev=None, microstep=None, gear_ratio=Non
     STEPS_PER_REV = MOTOR_STEP_PER_REV * MICROSTEP_SETTING * GEAR_RATIO
     DEG_PER_STEP  = 360.0 / STEPS_PER_REV
 
+
+# -------------------- Pin Aliases (for scurve.py) --------------------
+USE_PIN_SET = 23   # <--- 여기서 17 또는 23으로 변경
+
+if USE_PIN_SET == 17:
+    DIR_PIN  = DIR_PIN_17
+    STEP_PIN = STEP_PIN_17
+    ENA_PIN  = ENA_PIN_17
+elif USE_PIN_SET == 23:
+    DIR_PIN  = DIR_PIN_23
+    STEP_PIN = STEP_PIN_23
+    ENA_PIN  = ENA_PIN_23
+else:
+    raise ValueError("USE_PIN_SET은 17 또는 23만 가능합니다.")
+
+
 # -------------------- GPIO Helper --------------------
 class GPIOHelper:
+    """
+    scurve.py 호환용 인터페이스:
+      - set_dir(motor_id:int, forward:bool)
+      - set_enable(motor_id:int, enable:bool)
+      - pulse_step(motor_id:int, high_time:float, low_time:float)
+    기존 write/pulse 도 지원
+    """
+
     def __init__(self):
         self.sim = (lgpio is None)
         self.h = None
@@ -51,15 +78,43 @@ class GPIOHelper:
                 self.h = lgpio.gpiochip_open(0)
                 for pin in [DIR_PIN, STEP_PIN, ENA_PIN]:
                     lgpio.gpio_claim_output(self.h, pin)
-                lgpio.gpio_write(self.h, ENA_PIN, 0)  # Enable = LOW (A4988)
-            except Exception:
+                # 초기에는 모터 비활성화 (ENA = HIGH)
+                lgpio.gpio_write(self.h, ENA_PIN, 1)
+            except Exception as ex:
+                print(f"[GPIO] 초기화 실패, 시뮬레이션 모드 실행: {ex}")
                 self.sim = True
                 self.h = None
-                print("[GPIO]  GPIO 초기화 실패, 시뮬레이션 모드 실행")
 
+    # ---------- scurve.py용 ----------
+    def set_dir(self, motor_id: int, forward: bool):
+        if self.sim:
+            return
+        lgpio.gpio_write(self.h, DIR_PIN, 1 if forward else 0)
+
+    def set_enable(self, motor_id: int, enable: bool):
+        """
+        A4988 기준: Enable Active LOW
+        - enable=True  -> ENA 핀 LOW (0)
+        - enable=False -> ENA 핀 HIGH (1)
+        """
+        if self.sim:
+            return
+        lgpio.gpio_write(self.h, ENA_PIN, 0 if enable else 1)
+
+    def pulse_step(self, motor_id: int, high_time: float, low_time: float):
+        if self.sim:
+            time.sleep(high_time + low_time)
+            return
+        lgpio.gpio_write(self.h, STEP_PIN, 1)
+        time.sleep(high_time)
+        lgpio.gpio_write(self.h, STEP_PIN, 0)
+        time.sleep(low_time)
+
+    # ---------- 하위 호환 ----------
     def write(self, pin, val):
-        if not self.sim:
-            lgpio.gpio_write(self.h, pin, 1 if val else 0)
+        if self.sim:
+            return
+        lgpio.gpio_write(self.h, pin, 1 if val else 0)
 
     def pulse(self, pin, high_time_s, low_time_s):
         if self.sim:
@@ -76,6 +131,7 @@ class GPIOHelper:
                 lgpio.gpiochip_close(self.h)
             except Exception:
                 pass
+
 
 # -------------------- Encoder --------------------
 class Encoder:
@@ -135,7 +191,9 @@ class Encoder:
             except Exception:
                 pass
 
-from collections import deque
+
+# -------------------- Velocity Estimator --------------------
+
 
 
 class EncoderVelEstimator:
@@ -158,16 +216,3 @@ class EncoderVelEstimator:
         else:
             self.lpf_val = self.lpf_alpha * vel_ma + (1 - self.lpf_alpha) * self.lpf_val
         return self.lpf_val
-# -------------------- Pin Aliases (for scurve.py) --------------------
-USE_PIN_SET = 23   # <--- 여기서 17 또는 23으로 변경
-
-if USE_PIN_SET == 17:
-    DIR_PIN  = DIR_PIN_17
-    STEP_PIN = STEP_PIN_17
-    ENA_PIN  = ENA_PIN_17
-elif USE_PIN_SET == 23:
-    DIR_PIN  = DIR_PIN_23
-    STEP_PIN = STEP_PIN_23
-    ENA_PIN  = ENA_PIN_23
-else:
-    raise ValueError("USE_PIN_SET은 17 또는 23만 가능합니다.")
