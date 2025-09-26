@@ -19,6 +19,9 @@ ENCODER_A_PIN = 3
 ENCODER_B_PIN = 2
 ENCODER_INVERT = True
 
+IN1_PIN = 5
+IN2_PIN = 6
+PWM_PIN = 13
 # -------------------- Motor Parameters --------------------
 MOTOR_STEP_PER_REV = 200    # 보통 200 (1.8°/step 모터)
 MICROSTEP_SETTING  = 16     # A4988, TMC 등 드라이버 DIP 스위치 값
@@ -150,21 +153,26 @@ class EncoderVelEstimator:
         self.initialized = False
 
     def update(self, delta_count, dt):
-        # 순간 속도 (mm/s)
         vel_raw = ((delta_count / self.cpr) * self.pitch_mm) / dt
-
-        # 이동 평균
         self.buffer.append(vel_raw)
         vel_ma = sum(self.buffer) / len(self.buffer)
-
-        # 1차 Low-pass filter
         if not self.initialized:
             self.lpf_val = vel_ma
             self.initialized = True
         else:
-            self.lpf_val = (
-                self.lpf_alpha * vel_ma +
-                (1 - self.lpf_alpha) * self.lpf_val
-            )
-
+            self.lpf_val = self.lpf_alpha * vel_ma + (1 - self.lpf_alpha) * self.lpf_val
         return self.lpf_val
+
+# -------------------- Pin Aliases (for scurve.py) --------------------
+USE_PIN_SET = 23   # <--- 여기서 17 또는 23으로 변경
+
+if USE_PIN_SET == 17:
+    DIR_PIN  = DIR_PIN_17
+    STEP_PIN = STEP_PIN_17
+    ENA_PIN  = ENA_PIN_17
+elif USE_PIN_SET == 23:
+    DIR_PIN  = DIR_PIN_23
+    STEP_PIN = STEP_PIN_23
+    ENA_PIN  = ENA_PIN_23
+else:
+    raise ValueError("USE_PIN_SET은 17 또는 23만 가능합니다.")
