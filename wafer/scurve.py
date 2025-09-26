@@ -56,8 +56,8 @@ def compute_total_time_ascurve(total_steps: int, v_max_steps: float, shape="mid"
     """
     AS-curve: acc-const-dec
     """
-    if shape == "short":  r_acc, r_dec, r_const = 0.4, 0.6, 0.0
-    elif shape == "long": r_acc, r_dec, r_const = 0.15, 0.25, 0.6
+    if shape == "short":  r_acc, r_dec, r_const = 0.3, 0.7, 0.0
+    elif shape == "long": r_acc, r_dec, r_const = 0.10, 0.3, 0.6
     else:                 r_acc, r_dec, r_const = 0.2, 0.4, 0.4
     v_eff = vmax_effective(v_max_steps)
     coeff = 0.5*(r_acc+r_dec) + r_const
@@ -87,14 +87,14 @@ def as_curve_velocity(t: float, v_max: float,
     """AS-curve (cosine easing으로 매끄럽게)"""
     if t < t_acc:
         # 부드러운 가속 (0 → v_max)
-        return v_max * (1 - np.cos(np.pi * t / (2 * t_acc)))
+        return  v_max * np.sin((np.pi/2) * (t / t_acc))
     elif t < t_acc + t_const:
         # 정속
         return v_max
     elif t < T_total:
         tau = t - (t_acc + t_const)
         # 부드러운 감속 (v_max → 0)
-        return v_max * np.cos(np.pi * tau / (2 * t_dec))
+        return v_max * np.sin((np.pi/2) * (1 - tau / t_dec))
     return 0.0
 
 
