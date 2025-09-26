@@ -134,10 +134,13 @@ def run_motor_scurve(gpio, motor_id, direction, total_steps, v_max, shape="mid")
         now = time.time()
         if last_pulse_t is not None:
             dt = now - last_pulse_t
-            pul_based_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
+            inst_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
+            # 여기서 필터 적용 👇
+            pul_based_vel = alpha*inst_vel + (1-alpha)*pul_based_vel
         else:
             pul_based_vel = 0.0
         last_pulse_t = now
+
 
         # --- 명령 속도 deg/s ---
         com_vel_deg = com_vel_steps * DEG_PER_STEP
@@ -186,11 +189,14 @@ def run_motor_ascurve(
                         low_time=pulse_interval-0.00002)
         moved_steps += 1
 
+        
         # --- PUL 기반 속도 계산 ---
         now = time.time()
         if last_pulse_t is not None:
             dt = now - last_pulse_t
-            pul_based_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
+            inst_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
+            # 여기서 필터 적용 👇
+            pul_based_vel = alpha*inst_vel + (1-alpha)*pul_based_vel
         else:
             pul_based_vel = 0.0
         last_pulse_t = now
