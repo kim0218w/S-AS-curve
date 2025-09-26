@@ -1,86 +1,79 @@
+# graph.py
 import os
-import numpy as np
+import csv
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
 # -------------------- CSV 저장 --------------------
-def save_csv(df_or_list, filename="scurve_run.csv", **meta):
-    """
-    그래프에 사용된 DataFrame을 그대로 CSV로 저장.
-    - list면 표준 컬럼으로 DataFrame 변환
-    - 첫 줄에 메타데이터(# k=v, ...)
-    - enc_Vel_raw은 제거하지 않고 Encoder 속도(mm/s)로 저장
-    """
-    if isinstance(df_or_list, list):
-        df = pd.DataFrame(df_or_list, columns=[
-            "Time_ms", "com_Pos_mm", "enc_Pos_mm", "com_Vel_mm_per_s", "enc_Vel_raw"
-        ])
-    else:
-        df = df_or_list.copy()
-
+def save_csv(data_log, filename="scurve_run.csv", **meta):
     os.makedirs("logs", exist_ok=True)
     filepath = os.path.join("logs", filename)
-
-    preferred_cols = [
-        "Time_ms", "Time_s",
-        "com_Pos_mm", "enc_Pos_mm",
-        "com_Vel_mm_per_s", "enc_Vel_mm_per_s"
-    ]
-    cols = [c for c in preferred_cols if c in df.columns]
-    other_cols = [c for c in df.columns if c not in cols]
-    out_df = df[cols + other_cols]
-
     with open(filepath, "w", newline="") as f:
-        if meta:
-            f.write("# " + ", ".join(f"{k}={v}" for k, v in meta.items()) + "\n")
-        out_df.to_csv(f, index=False)
-
+        writer = csv.writer(f)
+        # 헤더
+        writer.writerow([
+            "Time_ms", "com_Pos_deg", "pul_Pos_deg",
+            "com_Vel_deg_per_s", "pul_Vel_deg_per_s"
+        ])
+        writer.writerows(data_log)
     print(f"-- 실행 완료! CSV 저장: {filepath} --")
     return filepath
 
 
-# -------------------- 실제 데이터 기반 플롯 --------------------
-def plot_results(data_or_path, title="S-curve Motion", **meta):
+# -------------------- 결과 플로팅 --------------------
+def plot_results(data_log, title="S/AS-Curve Motion", motor_id=None, steps=None, shape=None,
+                 roll_window=1):
     """
-    data_or_path : list (data_log) 또는 str (CSV 경로)
-    - list: run_motor_scurve() 반환값
-    - str : 저장된 CSV 파일 경로
+    roll_window: PUL 속도 계산용 이동 평균 윈도우 크기
+                 (펄스 기반 속도는 이미 매끈하므로 기본=1)
     """
 
-    if isinstance(data_or_path, str):
-        df = pd.read_csv(data_or_path)
-    elif isinstance(data_or_path, list):
-        df = pd.DataFrame(data_or_path, columns=[
-            "Time_ms", "com_Pos_mm", "enc_Pos_mm",
-            "com_Vel_mm_per_s", "enc_Vel_mm_per_s"
-        ])
-    else:
-        raise ValueError(f"지원하지 않는 입력 타입: {type(data_or_path)}")
+    df = pd.DataFrame(data_log, columns=[
+        "Time_ms", "com_Pos_deg", "pul_Pos_deg",
+        "com_Vel_deg_per_s", "pul_Vel_deg_per_s"
+    ])
 
-    plt.figure(figsize=(8, 6))
+    # 시간 [s]
+    df["Time_s"] = df["Time_ms"] / 1000.0
 
-    # --- 속도 비교 ---
-    plt.subplot(2, 1, 1)
-    plt.plot(df["Time_ms"], df["com_Vel_mm_per_s"],
-             label="Commanded Velocity [mm/s]", linestyle="--")
-    plt.plot(df["Time_ms"], df["enc_Vel_mm_per_s"],
-             label="Encoder Velocity [mm/s]", alpha=0.8)
-    plt.ylabel("Velocity [mm/s]")
-    plt.legend(); plt.grid(True)
+    # 이동 평균 smoothing
+    if roll_window > 1:
+        df["pul_Vel_deg_per_s"] = (
+            df["pul_Vel_deg_per_s"].rolling(roll_window, center=True).mean()
+        ).fillna(method="bfill").fillna(method="ffill")
 
-    # --- 위치 비교 ---
-    plt.subplot(2, 1, 2)
-    plt.plot(df["Time_ms"], df["com_Pos_mm"], label="Commanded Position [mm]")
-    plt.plot(df["Time_ms"], df["enc_Pos_mm"], label="Encoder Position [mm]", alpha=0.8)
-    plt.xlabel("Time [ms]"); plt.ylabel("Position [mm]")
-    plt.legend(); plt.grid(True)
+    # === 오차 계산 ===
+    df["pos_error"] = df["pul_Pos_deg"] - df["com_Pos_deg"]
+    df["vel_error"] = df["pul_Vel_deg_per_s"] - df["com_Vel_deg_per_s"]
 
-    if meta:
-        sub = ", ".join(f"{k}={v}" for k, v in meta.items())
-        plt.suptitle(f"{title} | {sub}")
-    else:
-        plt.suptitle(title)
+    # --- 플롯 ---
+    plt.figure(figsize=(10, 8))
 
+    # (1) 속도 그래프
+    plt.subplot(3, 1, 1)
+    plt.plot(df["Time_s"], df["com_Vel_deg_per_s"], "--", label="Commanded Vel [deg/s]")
+    plt.plot(df["Time_s"], df["pul_Vel_deg_per_s"], label=f"PUL-based Vel [deg/s] (avg={roll_window})")
+    plt.ylabel("Angular Velocity [deg/s]")
+    plt.legend()
+    plt.grid(True)
+
+    # (2) 위치 그래프
+    plt.subplot(3, 1, 2)
+    plt.plot(df["Time_s"], df["com_Pos_deg"], label="Commanded Pos [deg]")
+    plt.plot(df["Time_s"], df["pul_Pos_deg"], label="PUL-based Pos [deg]")
+    plt.ylabel("Angle [deg]")
+    plt.legend()
+    plt.grid(True)
+
+    # (3) 오차 그래프
+    plt.subplot(3, 1, 3)
+    plt.plot(df["Time_s"], df["pos_error"], label="Position Error [deg]")
+    plt.plot(df["Time_s"], df["vel_error"], label="Velocity Error [deg/s]")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Error")
+    plt.legend()
+    plt.grid(True)
+
+    plt.suptitle(f"{title} | motor={motor_id}, steps={steps}, shape={shape}")
     plt.tight_layout()
     plt.show()
