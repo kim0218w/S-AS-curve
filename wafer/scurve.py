@@ -2,15 +2,15 @@
 import time
 import numpy as np
 from typing import Tuple, List
-from encoder import EncoderVelEstimator  # Δcount → (MA+LPF) → mm/s
 
 # -------------------- Pulse Limits --------------------
 MIN_PULSE_INTERVAL = 0.001   # 1 kHz (최대 펄스 속도 한계)
 MAX_PULSE_INTERVAL = 0.05    # 20 Hz  (최저 펄스 속도 한계)
 
-def _mm_per_step(pitch_mm: float, steps_per_rev: int, microstep: int) -> float:
-    """한 스텝당 이동거리 [mm/step]"""
-    return pitch_mm / (steps_per_rev * microstep)
+# -------------------- 기본 모터 파라미터 --------------------
+STEPS_PER_REV = 200       # 1.8° 모터
+MICROSTEP = 16            # 드라이버 마이크로스텝 설정
+DEG_PER_STEP = 360.0 / (STEPS_PER_REV * MICROSTEP)
 
 def vmax_effective(v_max_steps: float,
                    min_pulse_interval: float = MIN_PULSE_INTERVAL) -> float:
@@ -52,7 +52,7 @@ def compute_segments(total_steps: int, v_max_steps: float,
 # -------------------- 총 시간 계산 (AS-curve) --------------------
 def compute_total_time_ascurve(total_steps: int, v_max_steps: float, shape="mid"):
     """
-    AS-curve: 삼각형/사다리꼴 가속도 곡선 (acc-const-dec)
+    AS-curve: acc-const-dec
     """
     if shape == "short":  r_acc, r_dec, r_const = 0.4, 0.6, 0.0
     elif shape == "long": r_acc, r_dec, r_const = 0.15, 0.25, 0.6
@@ -66,6 +66,7 @@ def compute_total_time_ascurve(total_steps: int, v_max_steps: float, shape="mid"
 def s_curve_velocity_steps(t: float, v_max_steps: float,
                            t_acc: float, t_const: float, t_dec: float,
                            T_total: float) -> float:
+    """S-curve (sin^2 프로파일)"""
     if T_total <= 0 or v_max_steps <= 0:
         return 0.0
     if t < t_acc:
@@ -79,6 +80,7 @@ def s_curve_velocity_steps(t: float, v_max_steps: float,
     return 0.0
 
 def as_curve_velocity(t: float, v_max: float, t_acc: float, t_const: float, t_dec: float, T_total: float) -> float:
+    """AS-curve (선형 acc/dec)"""
     if t < t_acc:
         return v_max * (t / t_acc)  # 선형 가속
     elif t < t_acc + t_const:
@@ -89,107 +91,110 @@ def as_curve_velocity(t: float, v_max: float, t_acc: float, t_const: float, t_de
     return 0.0
 
 # -------------------- 실행 (S-curve) --------------------
-def run_motor_scurve(
-    gpio, encoder, motor_id: int, direction: str,
-    total_steps: int, v_max_steps: float, shape: str = "mid",
-    *, pitch_mm: float = 5.0, steps_per_rev: int = 200, microstep: int = 16,
-    enc_cpr: int = 1000, dt: float = 0.01, estimator_win: int = 10, estimator_alpha: float = 0.2,
-) -> List[List[float]]:
-    T_total, t_acc, t_const, t_dec = compute_segments(total_steps, v_max_steps, shape)
-    v_eff = vmax_effective(v_max_steps)
-    mm_per_step = _mm_per_step(pitch_mm, steps_per_rev, microstep)
-    est = EncoderVelEstimator(cpr=enc_cpr, pitch_mm=pitch_mm,
-                              win_size=estimator_win, lpf_alpha=estimator_alpha)
+def run_motor_scurve(gpio, motor_id, direction, total_steps, v_max, shape="mid"):
+    # 세그먼트 시간 계산
+    T_total, t_acc, t_const, t_dec = compute_segments(total_steps, v_max, shape)
+    v_eff = vmax_effective(v_max)
 
-    gpio.set_dir(motor_id, direction.lower() == 'f')
+    gpio.set_dir(motor_id, direction == 'f')
     gpio.set_enable(motor_id, True)
 
-    moved_steps, step_acc, com_pos_mm = 0, 0.0, 0.0
-    prev_count = encoder.read()
-    enc_init_mm = (prev_count / enc_cpr) * pitch_mm
+    moved_steps = 0
     data_log = []
 
-    t0 = time.time()
+    last_pulse_t = None
+    start_t = time.time()
+
     while moved_steps < total_steps:
-        t = time.time() - t0
-        if t > T_total: break
+        t = time.time() - start_t
+        if t > T_total:
+            break
 
-        v_steps = s_curve_velocity_steps(t, v_eff, t_acc, t_const, t_dec, T_total)
-        com_vel_mm_s = v_steps * mm_per_step
-        dir_sign = 1.0 if direction.lower() == 'f' else -1.0
+        # 목표 속도 (steps/s)
+        com_vel_steps = s_curve_velocity_steps(t, v_eff, t_acc, t_const, t_dec, T_total)
+        if com_vel_steps < 1e-6:
+            time.sleep(0.001)
+            continue
 
-        step_acc += v_steps * dt
-        while step_acc >= 1.0 and moved_steps < total_steps:
-            gpio.pulse_step(motor_id, high_time=0.00002,
-                            low_time=max(MIN_PULSE_INTERVAL-0.00002,0.0))
-            moved_steps += 1
-            step_acc -= 1.0
+        # 펄스 간격 계산
+        pulse_interval = 1.0 / com_vel_steps
+        pulse_interval = max(MIN_PULSE_INTERVAL, min(pulse_interval, MAX_PULSE_INTERVAL))
 
-        com_pos_mm += dir_sign * (com_vel_mm_s * dt)
-        now = encoder.read()
-        delta = now - prev_count
-        prev_count = now
+        # === 실제 펄스 출력 ===
+        gpio.pulse_step(motor_id, high_time=0.00002, low_time=pulse_interval-0.00002)
+        moved_steps += 1
 
-        enc_pos_mm = (now / enc_cpr) * pitch_mm - enc_init_mm
-        enc_vel_mm_s = est.update(delta*dir_sign, dt)
+        # --- PUL 기반 속도 계산 ---
+        now = time.time()
+        if last_pulse_t is not None:
+            dt = now - last_pulse_t
+            pul_based_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
+        else:
+            pul_based_vel = 0.0
+        last_pulse_t = now
 
-        data_log.append([int(round(t*1000)), com_pos_mm, enc_pos_mm,
-                         com_vel_mm_s*dir_sign, enc_vel_mm_s])
+        # --- 명령 속도 deg/s ---
+        com_vel_deg = com_vel_steps * DEG_PER_STEP
+        com_pos = moved_steps * DEG_PER_STEP
 
-        sleep_left = dt - (time.time() - (t0 + t))
-        if sleep_left > 0: time.sleep(sleep_left)
+        # 로그 기록
+        t_ms = int(round(t * 1000))
+        data_log.append([t_ms, com_pos, com_pos, com_vel_deg, pul_based_vel])
 
     return data_log
 
 # -------------------- 실행 (AS-curve) --------------------
 def run_motor_ascurve(
-    gpio, encoder, motor_id: int, direction: str,
+    gpio, motor_id: int, direction: str,
     total_steps: int, v_max_steps: float, shape: str = "mid",
-    *, pitch_mm: float = 5.0, steps_per_rev: int = 200, microstep: int = 16,
-    enc_cpr: int = 1000, dt: float = 0.01, estimator_win: int = 10, estimator_alpha: float = 0.2,
 ) -> List[List[float]]:
+    """AS-curve 실행 (PUL 기반 속도 계산)"""
     T_total, t_acc, t_const, t_dec = compute_total_time_ascurve(total_steps, v_max_steps, shape)
     v_eff = vmax_effective(v_max_steps)
-    mm_per_step = _mm_per_step(pitch_mm, steps_per_rev, microstep)
-    est = EncoderVelEstimator(cpr=enc_cpr, pitch_mm=pitch_mm,
-                              win_size=estimator_win, lpf_alpha=estimator_alpha)
 
     gpio.set_dir(motor_id, direction.lower() == 'f')
     gpio.set_enable(motor_id, True)
 
-    moved_steps, step_acc, com_pos_mm = 0, 0.0, 0.0
-    prev_count = encoder.read()
-    enc_init_mm = (prev_count / enc_cpr) * pitch_mm
+    moved_steps = 0
     data_log = []
 
-    t0 = time.time()
+    last_pulse_t = None
+    start_t = time.time()
+
     while moved_steps < total_steps:
-        t = time.time() - t0
+        t = time.time() - start_t
         if t > T_total: break
 
+        # 목표 속도 (steps/s)
         v_steps = as_curve_velocity(t, v_eff, t_acc, t_const, t_dec, T_total)
-        com_vel_mm_s = v_steps * mm_per_step
-        dir_sign = 1.0 if direction.lower() == 'f' else -1.0
+        if v_steps < 1e-6:
+            time.sleep(0.001)
+            continue
 
-        step_acc += v_steps * dt
-        while step_acc >= 1.0 and moved_steps < total_steps:
-            gpio.pulse_step(motor_id, high_time=0.00002,
-                            low_time=max(MIN_PULSE_INTERVAL-0.00002,0.0))
-            moved_steps += 1
-            step_acc -= 1.0
+        # 펄스 간격 계산
+        pulse_interval = 1.0 / v_steps
+        pulse_interval = max(MIN_PULSE_INTERVAL, min(pulse_interval, MAX_PULSE_INTERVAL))
 
-        com_pos_mm += dir_sign * (com_vel_mm_s * dt)
-        now = encoder.read()
-        delta = now - prev_count
-        prev_count = now
+        # === 실제 펄스 출력 ===
+        gpio.pulse_step(motor_id, high_time=0.00002,
+                        low_time=pulse_interval-0.00002)
+        moved_steps += 1
 
-        enc_pos_mm = (now / enc_cpr) * pitch_mm - enc_init_mm
-        enc_vel_mm_s = est.update(delta*dir_sign, dt)
+        # --- PUL 기반 속도 계산 ---
+        now = time.time()
+        if last_pulse_t is not None:
+            dt = now - last_pulse_t
+            pul_based_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
+        else:
+            pul_based_vel = 0.0
+        last_pulse_t = now
 
-        data_log.append([int(round(t*1000)), com_pos_mm, enc_pos_mm,
-                         com_vel_mm_s*dir_sign, enc_vel_mm_s])
+        # --- 명령 속도 deg/s ---
+        com_vel_deg = v_steps * DEG_PER_STEP
+        com_pos = moved_steps * DEG_PER_STEP
 
-        sleep_left = dt - (time.time() - (t0 + t))
-        if sleep_left > 0: time.sleep(sleep_left)
+        # 로그 기록
+        t_ms = int(round(t * 1000))
+        data_log.append([t_ms, com_pos, com_pos, com_vel_deg, pul_based_vel])
 
     return data_log
