@@ -79,16 +79,22 @@ def s_curve_velocity_steps(t: float, v_max_steps: float,
         return v_max_steps * (np.cos(0.5 * np.pi * (tau / max(t_dec, 1e-9))))**2
     return 0.0
 
-def as_curve_velocity(t: float, v_max: float, t_acc: float, t_const: float, t_dec: float, T_total: float) -> float:
-    """AS-curve (선형 acc/dec)"""
+def as_curve_velocity(t: float, v_max: float,
+                      t_acc: float, t_const: float, t_dec: float,
+                      T_total: float) -> float:
+    """AS-curve (cosine easing으로 매끄럽게)"""
     if t < t_acc:
-        return v_max * (t / t_acc)  # 선형 가속
+        # 부드러운 가속 (0 → v_max)
+        return v_max * (1 - np.cos(np.pi * t / (2 * t_acc)))
     elif t < t_acc + t_const:
-        return v_max               # 정속
+        # 정속
+        return v_max
     elif t < T_total:
         tau = t - (t_acc + t_const)
-        return v_max * (1 - tau / t_dec)  # 선형 감속
+        # 부드러운 감속 (v_max → 0)
+        return v_max * np.cos(np.pi * tau / (2 * t_dec))
     return 0.0
+
 
 # -------------------- 실행 (S-curve) --------------------
 def run_motor_scurve(gpio, motor_id, direction, total_steps, v_max, shape="mid"):
