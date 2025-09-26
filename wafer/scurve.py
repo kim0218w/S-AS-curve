@@ -12,6 +12,8 @@ STEPS_PER_REV = 200       # 1.8° 모터
 MICROSTEP = 16            # 드라이버 마이크로스텝 설정
 DEG_PER_STEP = 360.0 / (STEPS_PER_REV * MICROSTEP)
 
+LPF_ALPHA = 0.1 # 속도 필터링 강도(0~1, 작을수록 더 매끄러워짐)
+
 def vmax_effective(v_max_steps: float,
                    min_pulse_interval: float = MIN_PULSE_INTERVAL) -> float:
     """하드웨어 펄스 한계 고려한 최대 속도 (steps/s)"""
@@ -131,16 +133,16 @@ def run_motor_scurve(gpio, motor_id, direction, total_steps, v_max, shape="mid")
         moved_steps += 1
 
         # --- PUL 기반 속도 계산 ---
+ 
         now = time.time()
         if last_pulse_t is not None:
             dt = now - last_pulse_t
             inst_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
-            # 여기서 필터 적용 👇
-            pul_based_vel = alpha*inst_vel + (1-alpha)*pul_based_vel
+            # LPF 적용
+            pul_based_vel = LPF_ALPHA*inst_vel + (1-LPF_ALPHA)*pul_based_vel
         else:
             pul_based_vel = 0.0
         last_pulse_t = now
-
 
         # --- 명령 속도 deg/s ---
         com_vel_deg = com_vel_steps * DEG_PER_STEP
@@ -195,11 +197,12 @@ def run_motor_ascurve(
         if last_pulse_t is not None:
             dt = now - last_pulse_t
             inst_vel = (1.0 / dt) * DEG_PER_STEP   # [deg/s]
-            # 여기서 필터 적용 👇
-            pul_based_vel = alpha*inst_vel + (1-alpha)*pul_based_vel
+            # LPF 적용
+            pul_based_vel = LPF_ALPHA*inst_vel + (1-LPF_ALPHA)*pul_based_vel
         else:
             pul_based_vel = 0.0
         last_pulse_t = now
+
 
         # --- 명령 속도 deg/s ---
         com_vel_deg = v_steps * DEG_PER_STEP
