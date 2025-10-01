@@ -9,7 +9,7 @@ MAX_PULSE_INTERVAL = 0.05    # 20 Hz  (최저 펄스 속도 한계)
 
 # -------------------- 기본 모터 파라미터 --------------------
 STEPS_PER_REV = 200       # 1.8° 모터
-MICROSTEP = 16            # 드라이버 마이크로스텝 설정
+MICROSTEP = 1           # 드라이버 마이크로스텝 설정
 DEG_PER_STEP = 360.0 / (STEPS_PER_REV * MICROSTEP)
 
 # LPF 계수 (0~1, 작을수록 더 부드러움)
