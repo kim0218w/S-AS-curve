@@ -204,3 +204,63 @@ def _run_motor_profile(
 
         # 펄스 기반 속도 추정(저역 통과)
         if last_pulse_t is not None:
+            dt_pul = max(now - last_pulse_t, 1e-12)
+            inst_vel = (1.0 / dt_pul) * DEG_PER_STEP
+            pul_based_vel = LPF_ALPHA * inst_vel + (1 - LPF_ALPHA) * pul_based_vel
+        last_pulse_t = now
+
+        # ---- ★ 고정 5ms 샘플러: CSV용 시간 그리드로 로깅 ----
+        # now가 다음 샘플 시각을 지났다면, 그 시각(t_samp)에 맞춰 기록을 남김
+        while now >= next_sample_due:
+            t_samp = next_sample_due - start
+
+            # 샘플 시점의 지령 속도(연속) 계산
+            v_steps_samp = vel_func(t_samp, v_eff, t_acc, t_const, t_dec, T_total)
+            com_vel_deg_samp = v_steps_samp * DEG_PER_STEP
+
+            # 위치는 최신 com_pos_deg와 moved_steps 기준(필요 시 보간 추가 가능)
+            data_log.append([
+                int(round(t_samp * 1000)),
+                com_pos_deg,
+                moved_steps * DEG_PER_STEP,
+                com_vel_deg_samp,
+                pul_based_vel
+            ])
+            next_sample_due += sample_period_s
+
+    # 마지막 보정 레코드(총 시간/총 스텝 기준으로 종단점 정렬)
+    final_t = max(T_total, time.perf_counter() - start)
+    com_pos_deg = total_steps * DEG_PER_STEP
+    pul_pos_deg = com_pos_deg
+    data_log.append([int(round(final_t * 1000)), com_pos_deg, pul_pos_deg, 0.0, 0.0])
+
+    return data_log
+
+# -------------------- 실행 (S-curve) --------------------
+def run_motor_scurve(gpio, motor_id, direction,
+                     total_steps, v_max, shape="mid") -> List[List[float]]:
+    T_total, t_acc, t_const, t_dec = compute_segments(total_steps, v_max, shape)
+    v_eff = vmax_effective(v_max)
+    return _run_motor_profile(
+        gpio, motor_id, direction,
+        total_steps, v_eff,
+        T_total, t_acc, t_const, t_dec,
+        s_curve_velocity_steps
+    )
+
+# -------------------- 실행 (AS-curve) --------------------
+def run_motor_ascurve(gpio, motor_id: int, direction: str,
+                      total_steps: int, v_max_steps: float,
+                      shape: str = "mid",
+                      r_acc: float = None, r_const: float = None, r_dec: float = None
+                      ) -> List[List[float]]:
+    T_total, t_acc, t_const, t_dec = compute_total_time_ascurve(
+        total_steps, v_max_steps, shape, r_acc, r_const, r_dec
+    )
+    v_eff = vmax_effective(v_max_steps)
+    return _run_motor_profile(
+        gpio, motor_id, direction,
+        total_steps, v_eff,
+        T_total, t_acc, t_const, t_dec,
+        as_curve_velocity
+    )
