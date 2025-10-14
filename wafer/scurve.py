@@ -120,11 +120,12 @@ def as_curve_velocity(t: float, v_max: float,
 
 # -------------------- 실행 (공통 루틴) --------------------
 
+# ...existing code...
 def _run_motor_profile(gpio, motor_id: int, direction: str,
                        total_steps: int, v_eff: float,
                        T_total: float, t_acc: float, t_const: float, t_dec: float,
                        vel_func) -> List[List[float]]:
-    """S/AS-curve 실행 (시간 기반, 5ms 단위 샘플링)"""
+    """S/AS-curve 실행 (시간 기반, 5ms 단위 샘플링, 일정 간격)"""
     gpio.set_dir(motor_id, direction.lower() == 'f')
     gpio.set_enable(motor_id, True)
 
@@ -134,20 +135,16 @@ def _run_motor_profile(gpio, motor_id: int, direction: str,
     pul_based_vel = 0.0
     start_t = time.perf_counter()
 
-    # 위치 적분 기반 com_pos
     com_pos_deg = 0.0
     last_t = start_t
 
-    # 샘플링 타이머 (5ms)
     dt_sample = 0.005
-    next_sample_t = 0.0
-
+    n = 0
     while True:
-        t = time.perf_counter() - start_t
+        t = n * dt_sample
         if t > T_total:
             break
 
-        # --- 이론적 속도/위치 ---
         v_steps = vel_func(t, v_eff, t_acc, t_const, t_dec, T_total)
         com_vel_deg = v_steps * DEG_PER_STEP
 
@@ -156,7 +153,7 @@ def _run_motor_profile(gpio, motor_id: int, direction: str,
         com_pos_deg += com_vel_deg * dt
         last_t = now_abs
 
-        # --- 펄스 발생 ---
+        # 펄스 발생 (동일)
         if v_steps > 1e-6:
             pulse_interval = 1.0 / v_steps
             pulse_interval = max(MIN_PULSE_INTERVAL, min(pulse_interval, MAX_PULSE_INTERVAL))
@@ -166,29 +163,27 @@ def _run_motor_profile(gpio, motor_id: int, direction: str,
             gpio.pulse_step(motor_id, high_time=high_time, low_time=low_time)
             moved_steps += 1
 
-            # PUL 기반 속도 추정 (LPF)
             if last_pulse_t is not None:
                 dt_pul = max(now_abs - last_pulse_t, 1e-9)
                 inst_vel = (1.0 / dt_pul) * DEG_PER_STEP
                 pul_based_vel = LPF_ALPHA * inst_vel + (1 - LPF_ALPHA) * pul_based_vel
             last_pulse_t = now_abs
 
-        # --- 5ms 단위 샘플링 ---
-        if t >= next_sample_t:
-            pul_pos_deg = moved_steps * DEG_PER_STEP
-            pul_vel_deg = pul_based_vel
-            t_ms = int(round(t * 1000))
-            data_log.append([t_ms, com_pos_deg, pul_pos_deg, com_vel_deg, pul_vel_deg])
-            next_sample_t += dt_sample
+        pul_pos_deg = moved_steps * DEG_PER_STEP
+        pul_vel_deg = pul_based_vel
+        t_ms = int(round(t * 1000))
+        data_log.append([t_ms, com_pos_deg, pul_pos_deg, com_vel_deg, pul_vel_deg])
 
-    # --- 마지막 보정 ---
+        n += 1
+        time.sleep(dt_sample)
+
+    # 마지막 보정 (동일)
     com_pos_deg = total_steps * DEG_PER_STEP
     pul_pos_deg = com_pos_deg
     t_ms = int(round(T_total * 1000))
     data_log.append([t_ms, com_pos_deg, pul_pos_deg, 0.0, 0.0])
 
     return data_log
-
 
 # -------------------- 실행 (S-curve) --------------------
 def run_motor_scurve(gpio, motor_id, direction,

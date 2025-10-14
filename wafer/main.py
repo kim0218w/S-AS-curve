@@ -1,5 +1,5 @@
 from encoder import GPIOHelper
-from scurve import run_motor_scurve, run_motor_ascurve, compute_total_time_scurve
+from scurve import run_motor_scurve, run_motor_ascurve
 from graph import save_csv, plot_results
 
 
