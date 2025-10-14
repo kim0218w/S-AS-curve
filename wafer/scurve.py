@@ -3,9 +3,8 @@ import math
 from typing import Tuple, List, Callable, Optional
 
 # -------------------- (참고) Pulse Limits --------------------
-# 원본과 호환을 위해 상수만 남겨두되, 실행 로직에서는 사용하지 않습니다.
-MIN_PULSE_INTERVAL = 0.001   # 1 kHz (미사용)
-MAX_PULSE_INTERVAL = 0.05    # 20 Hz (미사용)
+MIN_PULSE_INTERVAL = 0.001   # (미사용)
+MAX_PULSE_INTERVAL = 0.05    # (미사용)
 
 # -------------------- 기본 모터 파라미터 --------------------
 STEPS_PER_REV = 200
@@ -15,18 +14,17 @@ DEG_PER_STEP = 360.0 / (STEPS_PER_REV * MICROSTEP)
 # LPF 계수 (펄스 기반 속도 평활)
 LPF_ALPHA = 0.1
 
-# 최소 안전 하이 펄스폭(드라이버 데이터시트에 맞게 조정 권장)
+# 최소 안전 하이 펄스폭(드라이버 데이터시트 기준으로 조정 권장)
 DEFAULT_HIGH_TIME_MIN = 2e-6  # 2 µs
 
 # -------------------- 최대 속도 제한 (제거 버전) --------------------
 def vmax_effective(v_max_steps: float,
                    min_pulse_interval: float = MIN_PULSE_INTERVAL) -> float:
-    """이제는 하드웨어 펄스 상한을 적용하지 않고 그대로 반환합니다."""
+    """하드웨어 상한 적용 안 함: 그대로 반환"""
     return float(v_max_steps)
 
 # -------------------- Shape 분할 --------------------
 def _shape_fractions(shape: str) -> Tuple[float, float, float]:
-    """(r_acc, r_const, r_dec) 합 = 1"""
     s = (shape or "mid").lower()
     if s == "short":
         return 0.5, 0.0, 0.5
@@ -50,7 +48,7 @@ def compute_segments(total_steps: int, v_max_steps: float,
     r_acc, r_const, r_dec = _shape_fractions(shape)
     return T, r_acc * T, r_const * T, r_dec * T
 
-# -------------------- 총 시간 계산 (AS-curve, 직접 비율) --------------------
+# -------------------- 총 시간 계산 (AS-curve) --------------------
 def compute_total_time_ascurve(
     total_steps: int,
     v_max_steps: float,
@@ -59,7 +57,6 @@ def compute_total_time_ascurve(
     r_const: float = None,
     r_dec: float = None,
 ) -> Tuple[float, float, float, float]:
-    """AS-curve 총 시간 및 구간 계산"""
     if r_acc is None or r_const is None or r_dec is None:
         if shape == "short":
             r_acc, r_dec, r_const = 0.4, 0.6, 0.0
@@ -83,11 +80,10 @@ def compute_total_time_ascurve(
 
     return T, r_acc * T, r_const * T, r_dec * T
 
-# -------------------- 속도 프로파일 (math 사용, 저오버헤드) --------------------
+# -------------------- 속도 프로파일 --------------------
 def s_curve_velocity_steps(t: float, v_max_steps: float,
                            t_acc: float, t_const: float, t_dec: float,
                            T_total: float) -> float:
-    """S-curve (sin^2 프로파일) — 단위: steps/s"""
     if T_total <= 0 or v_max_steps <= 0:
         return 0.0
     if t < t_acc:
@@ -107,7 +103,6 @@ def s_curve_velocity_steps(t: float, v_max_steps: float,
 def as_curve_velocity(t: float, v_max: float,
                       t_acc: float, t_const: float, t_dec: float,
                       T_total: float) -> float:
-    """AS-curve (sine easing accel/decel) — 단위: steps/s"""
     if t < t_acc:
         return v_max * math.sin((math.pi / 2) * (t / (t_acc if t_acc > 0 else 1e-12)))
     elif t < t_acc + t_const:
@@ -117,7 +112,7 @@ def as_curve_velocity(t: float, v_max: float,
         return v_max * math.sin((math.pi / 2) * (1 - tau / (t_dec if t_dec > 0 else 1e-12)))
     return 0.0
 
-# -------------------- 실행 (고속·안전, 5ms 고정 로깅 포함) --------------------
+# -------------------- 실행 (고속·안전, 5ms 고정 로깅) --------------------
 def _run_motor_profile(
     gpio,
     motor_id: int, direction: str,
@@ -125,114 +120,101 @@ def _run_motor_profile(
     T_total: float, t_acc: float, t_const: float, t_dec: float,
     vel_func: Callable[[float, float, float, float, float, float], float],
     *,
-    high_time_min: float = DEFAULT_HIGH_TIME_MIN,   # 하이 펄스 최소 폭(안전)
-    duty: float = 0.5,                              # 듀티비(0.05~0.9 권장)
-    sample_period_s: float = 0.005                  # ★ CSV용 고정 샘플 주기(5ms)
+    high_time_min: float = DEFAULT_HIGH_TIME_MIN,
+    duty: float = 0.5,
+    sample_period_s: float = 0.005
 ) -> List[List[float]]:
     """
-    - 속도 상한(clamp) 없음: v_eff 그대로 사용
-    - 적응형 펄스 스케줄러: 다음 펄스 시각(next_due)에 맞춰 sleep/busy-wait
-    - 고정 5ms 샘플러 내장: CSV가 항상 0.005s 그리드로 기록됨
-    - lgpio 전제: pulse_burst 없이 pulse_step만 사용
-    반환: [t_ms, com_pos_deg, pul_pos_deg, com_vel_deg, pul_vel_deg] 리스트
+    - 사전 대기(next_due) 제거: 주기 제어는 pulse_step(high, low)에만 맡김(이중 대기 방지)
+    - 루프 종료 조건: 스텝 완료까지(시간 먼저 끝나도 계속)
+    - 5ms 고정 샘플러: CSV 시간열 고정 보장
     """
     gpio.set_dir(motor_id, direction.lower() == 'f')
     gpio.set_enable(motor_id, True)
 
     start = time.perf_counter()
-    now = start
-    t = 0.0
+    last_abs = start
 
-    # 상태 변수
     moved_steps = 0
     last_pulse_t: Optional[float] = None
     pul_based_vel = 0.0
     com_pos_deg = 0.0
-    last_loop_abs = start
 
     data_log: List[List[float]] = []
 
-    # 듀티/하이폭 안전 보정
     duty = min(0.9, max(0.05, float(duty)))
     high_time_min = max(0.0, float(high_time_min))
 
-    # 첫 속도/주기 및 첫 펄스 예정 시각
-    v_steps = max(0.0, vel_func(0.0, v_eff, t_acc, t_const, t_dec, T_total))
-    period = (1.0 / v_steps) if v_steps > 0.0 else 1e9
-    next_due = start + period
-
-    # ★ 고정 샘플러: CSV용 5ms 그리드
+    # 샘플러(5ms 그리드)
     next_sample_due = start + sample_period_s
 
-    # 메인 루프
-    while (t <= T_total) and (moved_steps < total_steps):
+    # 메인 루프: 스텝이 끝날 때까지
+    while moved_steps < total_steps:
         now = time.perf_counter()
         t = now - start
 
-        # 현재 목표 속도와 주기 업데이트
-        v_steps = vel_func(t, v_eff, t_acc, t_const, t_dec, T_total)
-        if v_steps > 0.0:
-            period = 1.0 / v_steps
-        else:
-            period = 1e9  # 사실상 무한대(대기)
-
-        # 다음 펄스 만기까지 적절히 휴면
-        sleep_time = next_due - now
-        if sleep_time > 0.0002:
-            # 너무 깊이 재우지 않고 소폭 여유를 둠
-            time.sleep(sleep_time - 0.0001)
+        # 현재 목표 속도와 주기
+        v_steps = vel_func(min(t, T_total), v_eff, t_acc, t_const, t_dec, T_total)
+        if v_steps <= 0.0:
+            # 속도가 0인 구간이면 잠깐 쉼 (바운드리에서 바운스 방지)
+            time.sleep(0.0005)
+            # 연속 좌표 적분(0이므로 변화 없음), 샘플러만 처리
             now = time.perf_counter()
+            # 샘플러 처리
+            while now >= next_sample_due:
+                t_samp = next_sample_due - start
+                v_steps_samp = vel_func(min(t_samp, T_total), v_eff, t_acc, t_const, t_dec, T_total)
+                data_log.append([
+                    int(round(t_samp * 1000)),
+                    com_pos_deg,
+                    moved_steps * DEG_PER_STEP,
+                    v_steps_samp * DEG_PER_STEP,
+                    pul_based_vel
+                ])
+                next_sample_due += sample_period_s
+            continue
 
-        # 마감 직전 촘촘히 대기
-        while now < next_due:
-            now = time.perf_counter()
-        t = now - start  # 펄스 직전의 실제 시간
-
-        # ---- 펄스 1회 출력 (lgpio: pulse_burst 없음) ----
-        high_time = max(high_time_min, period * duty)   # 듀티 반영
+        period = 1.0 / v_steps
+        # 듀티 적용(하이 펄스폭은 최소 요구치 이상)
+        high_time = max(high_time_min, period * duty)
         low_time = max(0.0, period - high_time)
+
+        # ---- 펄스 1회 ----
         gpio.pulse_step(motor_id, high_time=high_time, low_time=low_time)
         moved_steps += 1
 
-        # 다음 펄스 예정 시각 갱신(현재 주기 기준)
-        next_due = now + period
+        # 펄스 동안 흐른 실제 시간(= high_time + low_time + 함수 내부 오버헤드)
+        now2 = time.perf_counter()
+        dt = now2 - last_abs
+        last_abs = now2
 
-        # 연속 지령속도로 위치 적분(단순 직사각형 적분)
-        loop_dt = now - last_loop_abs
-        com_pos_deg += (v_steps * DEG_PER_STEP) * loop_dt
-        last_loop_abs = now
+        # 연속 지령속도로 위치 적분
+        com_pos_deg += (v_steps * DEG_PER_STEP) * dt
 
-        # 펄스 기반 속도 추정(저역 통과)
+        # 펄스 기반 속도 추정
         if last_pulse_t is not None:
-            dt_pul = max(now - last_pulse_t, 1e-12)
-            inst_vel = (1.0 / dt_pul) * DEG_PER_STEP
+            dt_p = max(now2 - last_pulse_t, 1e-12)
+            inst_vel = (1.0 / dt_p) * DEG_PER_STEP
             pul_based_vel = LPF_ALPHA * inst_vel + (1 - LPF_ALPHA) * pul_based_vel
-        last_pulse_t = now
+        last_pulse_t = now2
 
-        # ---- ★ 고정 5ms 샘플러: CSV용 시간 그리드로 로깅 ----
-        # now가 다음 샘플 시각을 지났다면, 그 시각(t_samp)에 맞춰 기록을 남김
-        while now >= next_sample_due:
+        # 5ms 고정 샘플러
+        while now2 >= next_sample_due:
             t_samp = next_sample_due - start
-
-            # 샘플 시점의 지령 속도(연속) 계산
-            v_steps_samp = vel_func(t_samp, v_eff, t_acc, t_const, t_dec, T_total)
-            com_vel_deg_samp = v_steps_samp * DEG_PER_STEP
-
-            # 위치는 최신 com_pos_deg와 moved_steps 기준(필요 시 보간 추가 가능)
+            v_steps_samp = vel_func(min(t_samp, T_total), v_eff, t_acc, t_const, t_dec, T_total)
             data_log.append([
                 int(round(t_samp * 1000)),
                 com_pos_deg,
                 moved_steps * DEG_PER_STEP,
-                com_vel_deg_samp,
+                v_steps_samp * DEG_PER_STEP,
                 pul_based_vel
             ])
             next_sample_due += sample_period_s
 
-    # 마지막 보정 레코드(총 시간/총 스텝 기준으로 종단점 정렬)
-    final_t = max(T_total, time.perf_counter() - start)
+    # 종료 보정
+    final_t = time.perf_counter() - start
     com_pos_deg = total_steps * DEG_PER_STEP
-    pul_pos_deg = com_pos_deg
-    data_log.append([int(round(final_t * 1000)), com_pos_deg, pul_pos_deg, 0.0, 0.0])
+    data_log.append([int(round(final_t * 1000)), com_pos_deg, com_pos_deg, 0.0, 0.0])
 
     return data_log
 
