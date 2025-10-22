@@ -21,7 +21,7 @@ def main():
                 motor_id=motor_id,
                 direction=direction,
                 total_steps=move_steps,
-                v_max=v_max,
+                v_max_steps=v_max,     
                 shape=shape,
             )
             filepath = save_csv(data_log)
@@ -34,12 +34,12 @@ def main():
             motor_id = int(input("모터 ID 입력 (예: 0): ").strip())
             shape = input("프로파일 선택 (short/mid/long) [기본: mid]: ").strip().lower() or "mid"
 
-            data_log = run_motor_ascurve(
+            data_log = run_motor_scurve(
                 gpio=gpio,
                 motor_id=motor_id,
                 direction=direction,
                 total_steps=move_steps,
-                v_max_steps=v_max,
+                v_max_steps=v_max,     
                 shape=shape,
             )
             filepath = save_csv(data_log)
