@@ -7,6 +7,21 @@ try:
 except ImportError:
     lgpio = None
 
+
+# ----- IRQ 타임소스 (ns) -----
+LAST_IRQ_TIME_NS = None
+
+def _set_irq_time(ts_ns: int):
+    """엔코더 엣지 콜백에서 호출해 마지막 IRQ 시각(ns)을 갱신."""
+    global LAST_IRQ_TIME_NS
+    LAST_IRQ_TIME_NS = int(ts_ns)
+
+def get_irq_time_s_or_none():
+    """마지막 IRQ 시각(초)을 반환. 없으면 None."""
+    if LAST_IRQ_TIME_NS is None:
+        return None
+    return LAST_IRQ_TIME_NS * 1e-9
+
 # -------------------- Pin Assignments --------------------
 STEP_PIN_17 = 23
 ENA_PIN_17  = 25
@@ -62,26 +77,21 @@ else:
 
 # -------------------- GPIO Helper --------------------
 class GPIOHelper:
-    """
-    scurve.py 호환용 인터페이스:
-      - set_dir(motor_id:int, forward:bool)
-      - set_enable(motor_id:int, enable:bool)
-      - pulse_step(motor_id:int, high_time:float, low_time:float)
-    기존 write/pulse 도 지원
-    """
-
     def __init__(self):
-        
         self.h = None
-            try:
-                self.h = lgpio.gpiochip_open(0)
-                for pin in [DIR_PIN, STEP_PIN, ENA_PIN]:
-                    lgpio.gpio_claim_output(self.h, pin)
-                lgpio.gpio_write(self.h, ENA_PIN, 1)
-                print("[GPIO] 초기화 성공. STEP_PIN: {STEP_PIN}, DIR_PIN: {DIR_PIN}, ENA_PIN: {ENA_PIN}")
-            except Exception as ex:
-                print(f"[GPIO] 초기화 실패, 프로그램이 종료될 수 있습니다. ({ex})")
-                raise
+        try:
+            self.h = lgpio.gpiochip_open(0)
+            for pin in [DIR_PIN, STEP_PIN, ENA_PIN]:
+                lgpio.gpio_claim_output(self.h, pin)
+            lgpio.gpio_write(self.h, ENA_PIN, 1)  # 모터 비활성(Active-LOW 가정)
+            print(f"[GPIO] 초기화 성공. STEP_PIN:{STEP_PIN}, DIR_PIN:{DIR_PIN}, ENA_PIN:{ENA_PIN}")
+            # ---- 타임소스: IRQ가 있으면 그 시각, 아니면 perf_counter ----
+            def now(self) -> float:
+                ts = get_irq_time_s_or_none()
+                return ts if ts is not None else time.perf_counter()
+        except Exception as ex:
+            print(f"[GPIO] 초기화 실패, 프로그램이 종료될 수 있습니다. ({ex})")
+            raise
 
     # ---------- scurve.py용 ----------
     def set_dir(self, motor_id: int, forward: bool):
@@ -101,31 +111,30 @@ class GPIOHelper:
         time.sleep(high_time)
         lgpio.gpio_write(self.h, STEP_PIN, 0)
         time.sleep(low_time)
-    def pulse_burst(self, motor_id: int, period_s: float, duty_cycle: float, num_cycles: int):
+    def pulse_burst(self, motor_id: int, *, high_time: float, low_time: float, count: int, base_period: float):
         """
-        하드웨어 PWM을 사용하여 여러 펄스를 한 번에 생성합니다.
-        lgpio.tx_pwm을 사용하며, 이는 지정된 횟수만큼 펄스를 생성합니다.
-        period_s: 펄스 1개 주기 (초)
-        duty_cycle: 펄스의 High 구간 비율 (0.0 ~ 1.0)
-        num_cycles: 생성할 펄스 수
+        scurve.py 호출 시그니처에 맞춘 버전.
+        - base_period는 안전 주기(>= high_time+low_time). 여기선 high/low에서 직접 계산.
+        - 하드웨어 버스트 API 없는 경우, 안전 루프 폴백.
         """
-        # if self.sim or not self.h: return 로직 삭제
-        if num_cycles <= 0:
+        if count <= 0:
             return
 
-        period_us = int(period_s * 1_000_000)
-        duty_cycle_lgpio = int(duty_cycle * 1_000_000)
+        period = max(base_period, high_time + low_time)
+        duty = max(0.1, min(0.9, high_time / period))
+        try:
+            # lgpio에 tx_pwm(버스트)가 있다면 사용
+            period_us = int(period * 1_000_000)
+            duty_lgpio = int(duty * 1_000_000)
+            lgpio.tx_pwm(self.h, STEP_PIN, period_us, duty_lgpio, count, 0, 0, 0)
+        except Exception:
+            # 폴백: 소프트웨어로 count회 펄스
+            for _ in range(count):
+                lgpio.gpio_write(self.h, STEP_PIN, 1)
+                time.sleep(high_time)
+                lgpio.gpio_write(self.h, STEP_PIN, 0)
+                time.sleep(low_time)
 
-        lgpio.tx_pwm(
-            self.h,
-            STEP_PIN,
-            period_us,
-            duty_cycle_lgpio,
-            num_cycles,
-            0,
-            0,
-            0
-        )
     # ---------- 하위 호환 ----------
     def write(self, pin, val):
         
