@@ -1,0 +1,42 @@
+"""Constants and pin mappings for motor control."""
+
+STEP_ANGLE_DEG = 1.8
+MICROSTEP = 16
+DEG_PER_STEP = STEP_ANGLE_DEG / MICROSTEP  # 0.1125 deg
+
+DIR_PIN_NAMA_17 = 24
+STEP_PIN_NAMA_17 = 23
+ENA_PIN_NAMA_17 = 25
+
+DIR_PIN_NAMA_23 = 20
+STEP_PIN_NAMA_23 = 21
+ENA_PIN_NAMA_23 = 16
+
+STEP_MON_NAMA_17 = 26  # BCM 26 (example)
+STEP_MON_NAMA_23 = 19  # BCM 19 (example)
+
+ENA_ACTIVE_LOW = True
+
+DEFAULT_HIGH_TIME_MIN = 8e-6
+MIN_LOW_TIME = 8e-6
+ENABLE_SETTLE_S = 0.001
+LPF_ALPHA = 0.15  # encoder velocity low-pass filter
+
+__all__ = [
+    "STEP_ANGLE_DEG",
+    "MICROSTEP",
+    "DEG_PER_STEP",
+    "DIR_PIN_NAMA_17",
+    "STEP_PIN_NAMA_17",
+    "ENA_PIN_NAMA_17",
+    "DIR_PIN_NAMA_23",
+    "STEP_PIN_NAMA_23",
+    "ENA_PIN_NAMA_23",
+    "STEP_MON_NAMA_17",
+    "STEP_MON_NAMA_23",
+    "ENA_ACTIVE_LOW",
+    "DEFAULT_HIGH_TIME_MIN",
+    "MIN_LOW_TIME",
+    "ENABLE_SETTLE_S",
+    "LPF_ALPHA",
+]
