@@ -1,0 +1,9 @@
+Commands:
+  ACT e/r                              -> actuator extend/retract
+  M1 f/b [steps] [accel] [gamma <shape>] [accel2 <decel>] [gamma2 <shape>] [speed <deg/s>|rpm <value>] [pid? Kp Ki Kd]  -> motor1
+  M2 f/b [steps] [accel] [gamma <shape>] [accel2 <decel>] [gamma2 <shape>] [speed <deg/s>|rpm <value>] [pid? Kp Ki Kd]  -> motor2
+  q                                    -> quit
+>> m2 f 10000 0.05 gamma=0.5
+[M2] steps=10000, accel_ratio=0.05, gamma=1.0, direction=0, PID=False gains=-
+[INFO] Motion CSV saved: /home/raspberrypi/Desktop/s-curve/logs/m2_open_20251030_170228.csv
+[INFO] Pulse-based RPM (filtered) avg=4.22, max=5.01
