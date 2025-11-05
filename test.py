@@ -48,20 +48,31 @@ MIN_SAFE_DELAY = 0.00025  # 250 us (최소 안전 딜레이)
 # GPIO 핀 초기화 (lgpio 사용)
 h = None
 if lgpio is not None:
-    h = lgpio.gpiochip_open(0)
-    
-    # 핀 설정
-    lgpio.gpio_claim_output(h, DIR_PIN_NAMA_17)
-    lgpio.gpio_claim_output(h, STEP_PIN_NAMA_17)
-    lgpio.gpio_claim_output(h, ENA_PIN_NAMA_17)
-    
-    lgpio.gpio_claim_output(h, DIR_PIN_NAMA_23)
-    lgpio.gpio_claim_output(h, STEP_PIN_NAMA_23)
-    lgpio.gpio_claim_output(h, ENA_PIN_NAMA_23)
-    
-    lgpio.gpio_claim_output(h, IN1_PIN)
-    lgpio.gpio_claim_output(h, IN2_PIN)
-    lgpio.tx_pwm(h, PWM_PIN, 1000, 0)  # PWM 초기화
+    try:
+        h = lgpio.gpiochip_open(0)
+        print("[INFO] GPIO chip opened successfully")
+        
+        # 핀 설정
+        lgpio.gpio_claim_output(h, DIR_PIN_NAMA_17)
+        lgpio.gpio_claim_output(h, STEP_PIN_NAMA_17)
+        lgpio.gpio_claim_output(h, ENA_PIN_NAMA_17)
+        
+        lgpio.gpio_claim_output(h, DIR_PIN_NAMA_23)
+        lgpio.gpio_claim_output(h, STEP_PIN_NAMA_23)
+        lgpio.gpio_claim_output(h, ENA_PIN_NAMA_23)
+        
+        lgpio.gpio_claim_output(h, IN1_PIN)
+        lgpio.gpio_claim_output(h, IN2_PIN)
+        
+        # PWM 초기화 (주파수 1000Hz, duty 0%)
+        lgpio.tx_pwm(h, PWM_PIN, 1000, 0)
+        print("[INFO] GPIO pins initialized successfully")
+        print(f"[INFO] Actuator pins: IN1={IN1_PIN}, IN2={IN2_PIN}, PWM={PWM_PIN}")
+    except Exception as e:
+        print(f"[ERROR] GPIO initialization failed: {e}")
+        h = None
+else:
+    print("[ERROR] lgpio library not available")
 
 
 def smooth_cos_delay(i, n, min_delay, max_delay, gamma=1.0):
@@ -141,32 +152,53 @@ def move_motor_scurve(h, dir_pin, step_pin, total_steps, direction, min_delay, m
 
 def extend(speed=1.0):
     """액추에이터 확장 (lgpio)"""
-    if lgpio is None or h is None:
+    if lgpio is None:
+        print("[ERROR] lgpio is not available")
         return
-    duty = int(max(0, min(100, speed * 100)))
-    lgpio.gpio_write(h, IN1_PIN, 1)
-    lgpio.gpio_write(h, IN2_PIN, 0)
-    lgpio.tx_pwm(h, PWM_PIN, 1000, duty)
-    print(f"리니어 액추에이터 확장, 속도: {speed}")
+    if h is None:
+        print("[ERROR] GPIO handle is not initialized")
+        return
+    try:
+        duty = int(max(0, min(100, speed * 100)))
+        lgpio.gpio_write(h, IN1_PIN, 1)
+        lgpio.gpio_write(h, IN2_PIN, 0)
+        lgpio.tx_pwm(h, PWM_PIN, 1000, duty)
+        print(f"[INFO] 리니어 액추에이터 확장, 속도: {speed} (duty: {duty}%)")
+    except Exception as e:
+        print(f"[ERROR] 액추에이터 확장 실패: {e}")
 
 def retract(speed=1.0):
     """액추에이터 수축 (lgpio)"""
-    if lgpio is None or h is None:
+    if lgpio is None:
+        print("[ERROR] lgpio is not available")
         return
-    duty = int(max(0, min(100, speed * 100)))
-    lgpio.gpio_write(h, IN1_PIN, 0)
-    lgpio.gpio_write(h, IN2_PIN, 1)
-    lgpio.tx_pwm(h, PWM_PIN, 1000, duty)
-    print(f"리니어 액추에이터 수축, 속도: {speed}")
+    if h is None:
+        print("[ERROR] GPIO handle is not initialized")
+        return
+    try:
+        duty = int(max(0, min(100, speed * 100)))
+        lgpio.gpio_write(h, IN1_PIN, 0)
+        lgpio.gpio_write(h, IN2_PIN, 1)
+        lgpio.tx_pwm(h, PWM_PIN, 1000, duty)
+        print(f"[INFO] 리니어 액추에이터 수축, 속도: {speed} (duty: {duty}%)")
+    except Exception as e:
+        print(f"[ERROR] 액추에이터 수축 실패: {e}")
 
 def stop_actuator():
     """액추에이터 정지 (lgpio)"""
-    if lgpio is None or h is None:
+    if lgpio is None:
+        print("[ERROR] lgpio is not available")
         return
-    lgpio.gpio_write(h, IN1_PIN, 0)
-    lgpio.gpio_write(h, IN2_PIN, 0)
-    lgpio.tx_pwm(h, PWM_PIN, 1000, 0)
-    print("리니어 액추에이터 정지")
+    if h is None:
+        print("[ERROR] GPIO handle is not initialized")
+        return
+    try:
+        lgpio.gpio_write(h, IN1_PIN, 0)
+        lgpio.gpio_write(h, IN2_PIN, 0)
+        lgpio.tx_pwm(h, PWM_PIN, 1000, 0)
+        print("[INFO] 리니어 액추에이터 정지")
+    except Exception as e:
+        print(f"[ERROR] 액추에이터 정지 실패: {e}")
 
 try:
     input("엔터 키를 눌러 다음 단계로 진행하세요...")  # 사용자로부터 엔터 입력받기
@@ -185,7 +217,7 @@ try:
         
         
     # 리니어 액추에이터 수축
-        extend(1)  # 100% 속도로 수축
+        retract(1)  # 100% 속도로 수축
         time.sleep(aaa)  # 2.5초 동안 수축
         stop_actuator()
         time.sleep(0.1)  # 0.1초 동안 정지
@@ -194,7 +226,7 @@ try:
         time.sleep(5.0)  # 5초 정지
 
     # 리니어 액추에이터 확장
-        retract(1)  # 100% 속도로 확장
+        extend(1)  # 100% 속도로 확장
         time.sleep(b)  # 3.0초 동안 확장 
         stop_actuator()
         time.sleep(0.1)  # 0.1초 동안 정지
