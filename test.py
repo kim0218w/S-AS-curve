@@ -14,6 +14,13 @@ except Exception:
     lgpio = None
     print("[ERROR] lgpio is not available. Run on Raspberry Pi with lgpio installed.")
 
+try:
+    from gpiozero import DigitalOutputDevice, PWMOutputDevice
+except Exception:
+    DigitalOutputDevice = None
+    PWMOutputDevice = None
+    print("[ERROR] gpiozero is not available. Install with: pip install gpiozero")
+
 # 핀 설정
 DIR_PIN_NAMA_17 = 24
 STEP_PIN_NAMA_17 = 23
@@ -45,14 +52,15 @@ GAMMA = 0.3  # S-curve 기울기
 # S-curve 상수
 MIN_SAFE_DELAY = 0.00025  # 250 us (최소 안전 딜레이)
 
-# GPIO 핀 초기화 (lgpio 사용)
+# GPIO 핀 초기화
+# lgpio: 스테퍼 모터용
 h = None
 if lgpio is not None:
     try:
         h = lgpio.gpiochip_open(0)
-        print("[INFO] GPIO chip opened successfully")
+        print("[INFO] GPIO chip opened successfully (lgpio)")
         
-        # 핀 설정
+        # 스테퍼 모터 핀만 설정 (액추에이터는 gpiozero 사용)
         lgpio.gpio_claim_output(h, DIR_PIN_NAMA_17)
         lgpio.gpio_claim_output(h, STEP_PIN_NAMA_17)
         lgpio.gpio_claim_output(h, ENA_PIN_NAMA_17)
@@ -61,18 +69,30 @@ if lgpio is not None:
         lgpio.gpio_claim_output(h, STEP_PIN_NAMA_23)
         lgpio.gpio_claim_output(h, ENA_PIN_NAMA_23)
         
-        lgpio.gpio_claim_output(h, IN1_PIN)
-        lgpio.gpio_claim_output(h, IN2_PIN)
-        
-        # PWM 초기화 (주파수 1000Hz, duty 0%)
-        lgpio.tx_pwm(h, PWM_PIN, 1000, 0)
-        print("[INFO] GPIO pins initialized successfully")
-        print(f"[INFO] Actuator pins: IN1={IN1_PIN}, IN2={IN2_PIN}, PWM={PWM_PIN}")
+        print("[INFO] Stepper motor pins initialized (lgpio)")
     except Exception as e:
         print(f"[ERROR] GPIO initialization failed: {e}")
         h = None
 else:
     print("[ERROR] lgpio library not available")
+
+# gpiozero: 액추에이터용
+actuator_in1 = None
+actuator_in2 = None
+actuator_pwm = None
+if DigitalOutputDevice is not None and PWMOutputDevice is not None:
+    try:
+        actuator_in1 = DigitalOutputDevice(IN1_PIN, initial_value=False)
+        actuator_in2 = DigitalOutputDevice(IN2_PIN, initial_value=False)
+        actuator_pwm = PWMOutputDevice(PWM_PIN, initial_value=0.0, frequency=1000)
+        print(f"[INFO] Actuator initialized (gpiozero): IN1={IN1_PIN}, IN2={IN2_PIN}, PWM={PWM_PIN}")
+    except Exception as e:
+        print(f"[ERROR] Actuator initialization failed: {e}")
+        actuator_in1 = None
+        actuator_in2 = None
+        actuator_pwm = None
+else:
+    print("[ERROR] gpiozero library not available")
 
 
 def smooth_cos_delay(i, n, min_delay, max_delay, gamma=1.0):
@@ -151,51 +171,42 @@ def move_motor_scurve(h, dir_pin, step_pin, total_steps, direction, min_delay, m
 
 
 def extend(speed=1.0):
-    """액추에이터 확장 (lgpio)"""
-    if lgpio is None:
-        print("[ERROR] lgpio is not available")
-        return
-    if h is None:
-        print("[ERROR] GPIO handle is not initialized")
+    """액추에이터 확장 (gpiozero)"""
+    if actuator_in1 is None or actuator_in2 is None or actuator_pwm is None:
+        print("[ERROR] Actuator devices not initialized (gpiozero)")
         return
     try:
-        duty = int(max(0, min(100, speed * 100)))
-        lgpio.gpio_write(h, IN1_PIN, 1)
-        lgpio.gpio_write(h, IN2_PIN, 0)
-        lgpio.tx_pwm(h, PWM_PIN, 1000, duty)
-        print(f"[INFO] 리니어 액추에이터 확장, 속도: {speed} (duty: {duty}%)")
+        speed = max(0.0, min(1.0, float(speed)))
+        actuator_in1.on()   # IN1 = HIGH
+        actuator_in2.off()  # IN2 = LOW
+        actuator_pwm.value = speed  # PWM duty cycle (0.0 ~ 1.0)
+        print(f"[INFO] 리니어 액추에이터 확장, 속도: {speed} (duty: {speed*100:.1f}%)")
     except Exception as e:
         print(f"[ERROR] 액추에이터 확장 실패: {e}")
 
 def retract(speed=1.0):
-    """액추에이터 수축 (lgpio)"""
-    if lgpio is None:
-        print("[ERROR] lgpio is not available")
-        return
-    if h is None:
-        print("[ERROR] GPIO handle is not initialized")
+    """액추에이터 수축 (gpiozero)"""
+    if actuator_in1 is None or actuator_in2 is None or actuator_pwm is None:
+        print("[ERROR] Actuator devices not initialized (gpiozero)")
         return
     try:
-        duty = int(max(0, min(100, speed * 100)))
-        lgpio.gpio_write(h, IN1_PIN, 0)
-        lgpio.gpio_write(h, IN2_PIN, 1)
-        lgpio.tx_pwm(h, PWM_PIN, 1000, duty)
-        print(f"[INFO] 리니어 액추에이터 수축, 속도: {speed} (duty: {duty}%)")
+        speed = max(0.0, min(1.0, float(speed)))
+        actuator_in1.off()  # IN1 = LOW
+        actuator_in2.on()   # IN2 = HIGH
+        actuator_pwm.value = speed  # PWM duty cycle (0.0 ~ 1.0)
+        print(f"[INFO] 리니어 액추에이터 수축, 속도: {speed} (duty: {speed*100:.1f}%)")
     except Exception as e:
         print(f"[ERROR] 액추에이터 수축 실패: {e}")
 
 def stop_actuator():
-    """액추에이터 정지 (lgpio)"""
-    if lgpio is None:
-        print("[ERROR] lgpio is not available")
-        return
-    if h is None:
-        print("[ERROR] GPIO handle is not initialized")
+    """액추에이터 정지 (gpiozero)"""
+    if actuator_in1 is None or actuator_in2 is None or actuator_pwm is None:
+        print("[ERROR] Actuator devices not initialized (gpiozero)")
         return
     try:
-        lgpio.gpio_write(h, IN1_PIN, 0)
-        lgpio.gpio_write(h, IN2_PIN, 0)
-        lgpio.tx_pwm(h, PWM_PIN, 1000, 0)
+        actuator_in1.off()  # IN1 = LOW
+        actuator_in2.off()  # IN2 = LOW
+        actuator_pwm.value = 0.0  # PWM off
         print("[INFO] 리니어 액추에이터 정지")
     except Exception as e:
         print(f"[ERROR] 액추에이터 정지 실패: {e}")
@@ -274,12 +285,31 @@ except KeyboardInterrupt:
     print("프로그램 종료")
 
 finally:
-    if lgpio is not None and h is not None:
-        # ENA 핀 on = 모터 비활성화 (lgpio: 1 = 비활성화)
-        lgpio.gpio_write(h, ENA_PIN_NAMA_23, 1)
-        lgpio.gpio_write(h, ENA_PIN_NAMA_17, 1)
-        
-        # GPIO 리소스 해제는 lgpiochip_close로 처리
+    # 액추에이터 정지 (gpiozero)
+    try:
         stop_actuator()
-        lgpio.gpiochip_close(h)
-        print("[INFO] GPIO released")
+    except Exception as e:
+        print(f"[WARN] Error stopping actuator: {e}")
+    
+    # gpiozero 디바이스 정리
+    try:
+        if actuator_in1 is not None:
+            actuator_in1.close()
+        if actuator_in2 is not None:
+            actuator_in2.close()
+        if actuator_pwm is not None:
+            actuator_pwm.close()
+        print("[INFO] Actuator devices closed (gpiozero)")
+    except Exception as e:
+        print(f"[WARN] Error closing actuator devices: {e}")
+    
+    # lgpio 정리 (스테퍼 모터)
+    if lgpio is not None and h is not None:
+        try:
+            # ENA 핀 on = 모터 비활성화 (lgpio: 1 = 비활성화)
+            lgpio.gpio_write(h, ENA_PIN_NAMA_23, 1)
+            lgpio.gpio_write(h, ENA_PIN_NAMA_17, 1)
+            lgpio.gpiochip_close(h)
+            print("[INFO] GPIO released (lgpio)")
+        except Exception as e:
+            print(f"[WARN] Error releasing GPIO: {e}")
