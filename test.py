@@ -37,7 +37,7 @@ PWM_PIN = 13  # PWM을 GPIO 13에 연결
 # 속도 변수 설정
 a = 0.0004  # NEMA23 최소 딜레이
 aa = 0.0005  # NEMA17 최소 딜레이
-aaa = 2.5  # 액추에이터 상승 시간 (초)
+aaa = 1.5  # 액추에이터 상승 시간 (초)
 b = 3.0  # 엑추에이터 하강 시간 (초)
 
 # 스텝 수 설정
@@ -219,28 +219,26 @@ try:
             lgpio.gpio_write(h, ENA_PIN_NAMA_23, 0)
             lgpio.gpio_write(h, ENA_PIN_NAMA_17, 0)
     
-    #17 앞으로  -> act 아래 -> act 위 -> 23 f:on(시계 : 10000) -> act 아래 -> act 위 -> 17 뒤로 -> 23 b(반시계 : 10000)
+    #act 위 ->  23 f:on(시계 : 10000) -> act 아래 -> act 위 -> 17 뒤로 -> 23 b(반시계 : 10000)
     # 네마 17 모터 작동 (S-curve 적용)
         if lgpio is not None and h is not None:
             print("[INFO] NEMA17 모터 작동 (정방향, S-curve)")
             move_motor_scurve(h, DIR_PIN_NAMA_17, STEP_PIN_NAMA_17, 
                             steps_per_nama_17, 0, aa, aa * 4)  # min_delay=aa, max_delay=aa*4
-        
+    #3초 딜레이
+        time.sleep(3.0)
         
     # 리니어 액추에이터 수축
         retract(1)  # 100% 속도로 수축
-        time.sleep(aaa)  # 2.5초 동안 수축
+        time.sleep(aaa)  # 1.5초 동안 수축
         stop_actuator()
         time.sleep(0.1)  # 0.1초 동안 정지
         
-        # 코드 끝나고 5초 정지 딜레이 추가
-        time.sleep(5.0)  # 5초 정지
-
-    # 리니어 액추에이터 확장
-        extend(1)  # 100% 속도로 확장
-        time.sleep(b)  # 3.0초 동안 확장 
-        stop_actuator()
-        time.sleep(0.1)  # 0.1초 동안 정지
+    # # 리니어 액추에이터 확장
+    #     extend(1)  # 100% 속도로 확장
+    #     time.sleep(aaa)  # 1.5초 동안 확장 
+    #     stop_actuator()
+    #     time.sleep(0.1)  # 0.1초 동안 정지
     
     # 네마 23 모터 작동 23 f(시계 : 10000) (S-curve 적용)
         if lgpio is not None and h is not None:
@@ -251,17 +249,16 @@ try:
         
     # 리니어 액추에이터 확장
         extend(1)  # 100% 속도로 확장
-        time.sleep(b)  # 3.0초 동안 확장
+        time.sleep(aaa)  # 1.5초 동안 확장
         stop_actuator()
         time.sleep(0.1)  # 0.1초 동안 정지
 
     # 코드 끝나고 5초 정지 딜레이 추가
-        time.sleep(5.0)  # 5초 정지
-
+        time.sleep(3.0)  # 5초 정지
 
     # 리니어 액추에이터 수축
         retract(1)  # 100% 속도로 수축
-        time.sleep(aaa)  # 2.5초 동안 내려가 
+        time.sleep(aaa)  # 1.5초 동안 수축
         stop_actuator()
         time.sleep(0.1)  # 0.1초 동안 정지
 
